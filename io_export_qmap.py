@@ -257,10 +257,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         bm = bmesh.new()
 
         if self.option_geo == 'Faces' and objects != []:
-            orig_mode = context.object.mode
             orig_sel = context.selected_objects
             orig_act = context.active_object
-            bpy.ops.object.mode_set(mode='OBJECT')
+            if orig_act is not None:
+                orig_mode = orig_act.mode
+                bpy.ops.object.mode_set(mode='OBJECT')
             bpy.ops.object.select_all(action='DESELECT')
             for obj in objects:
                 obj.select_set(True)
@@ -296,7 +297,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             for obj in orig_sel:
                 obj.select_set(True)
             context.view_layer.objects.active = orig_act
-            bpy.ops.object.mode_set(mode=orig_mode)
+            if orig_act is not None:
+                bpy.ops.object.mode_set(mode=orig_mode)
 
         elif self.option_geo == 'Brushes':
             for obj in objects:
