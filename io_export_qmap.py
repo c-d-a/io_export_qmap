@@ -40,6 +40,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
 
     option_sel: BoolProperty(name="Selection only", default=True)
+    option_tm: BoolProperty(name="Apply transform", default=True)
     option_geo: EnumProperty(name="Geo", default='Faces',
         items=( ('Brushes', "Brushes", "Export each object as a convex brush"),
                 ('Faces', "Faces", "Export each face as a pyramid brush") ) )
@@ -272,6 +273,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             mobj.data.materials.append(None) # empty slot for new faces
             bm.from_mesh(mobj.data)
 
+            if self.option_tm:
+                bmesh.ops.transform(bm, matrix=obj.matrix_world,
+                                                verts=bm.verts)
             for vert in bm.verts:
                 vert.co = self.gridsnap(vert.co)
             bmesh.ops.connect_verts_concave(bm, faces=bm.faces)
@@ -303,6 +307,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         elif self.option_geo == 'Brushes':
             for obj in objects:
                 bm.from_mesh(obj.data)
+                if self.option_tm:
+                    bmesh.ops.transform(bm, matrix=obj.matrix_world,
+                                                    verts=bm.verts)
                 for vert in bm.verts:
                     vert.co = self.gridsnap(vert.co)
                 hull = bmesh.ops.convex_hull(bm, input=bm.verts,
