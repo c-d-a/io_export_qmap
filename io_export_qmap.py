@@ -18,8 +18,8 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2019, 11, 16),
-    "blender": (2, 80, 0),
+    "version": (2019, 11, 26),
+    "blender": (2, 81, 0),
     "location": "File > Import-Export",
     "description": "Export geometry as brushes",
     "category": "Import-Export",
@@ -82,6 +82,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
         V = [loop.vert.co for loop in face.loops]
         uv_layer = mesh.loops.layers.uv.active
+        if uv_layer is None:
+            uv_layer = mesh.loops.layers.uv.new("dummy")
         T = [loop[uv_layer].uv for loop in face.loops]
 
         # UV handling ported from: https://bitbucket.org/khreathor/obj-2-map
