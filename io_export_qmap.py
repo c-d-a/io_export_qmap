@@ -179,7 +179,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             up_full[3] = (T[0].y - test_t) * height
 
             texstring += f" [ {self.printvec(rt_full)} ]"\
-                        f"[ {self.printvec(up_full)} ]"\
+                        f" [ {self.printvec(up_full)} ]"\
                         f" 0 {self.printvec(scale)}\n"
 
         elif self.option_format == 'Quake':
