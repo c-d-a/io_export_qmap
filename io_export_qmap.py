@@ -72,7 +72,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         width = height = 64
         if obj.material_slots:
             mat = obj.material_slots[face.material_index].material
-        if mat:
+        if mat and mat.node_tree is not None:
             for node in mat.node_tree.nodes:
                 if node.type == 'TEX_IMAGE':
                     width, height = node.image.size
@@ -98,12 +98,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             # Set up "2d world" coordinate system with the 01 edge along X
             world01 = V[1] - V[0]
             world02 = V[2] - V[0]
-            
-            if world01.length < 0.00001 or world02.length < 0.00001:
-              world01_02Angle = 0
-            else:
-              world01_02Angle = world01.angle(world02)
-              
+            world01_02Angle = world01.angle(world02)
             if face.normal.dot(world01.cross(world02)) < 0:
                 world01_02Angle = -world01_02Angle
             world01_2d = Vector((world01.length, 0.0))
