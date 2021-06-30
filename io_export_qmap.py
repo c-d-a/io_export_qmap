@@ -18,7 +18,7 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2021, 06, 30),
+    "version": (2021, 6, 30),
     "blender": (2, 92, 0),
     "location": "File > Import-Export",
     "description": "Export geometry as brushes",
