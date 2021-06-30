@@ -73,11 +73,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         if obj.material_slots:
             mat = obj.material_slots[face.material_index].material
         if mat:
-            for node in mat.node_tree.nodes:
-                if node.type == 'TEX_IMAGE':
-                    if node.image.has_data:
-                        width, height = node.image.size
-                        break
+            if mat.node_tree:
+                for node in mat.node_tree.nodes:
+                    if node.type == 'TEX_IMAGE':
+                        if node.image.has_data:
+                            width, height = node.image.size
+                            break
             texstring = mat.name.replace(" ","_")
         else:
             texstring = self.option_skip
