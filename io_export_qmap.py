@@ -18,8 +18,8 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2019, 11, 26),
-    "blender": (2, 81, 0),
+    "version": (2021, 06, 30),
+    "blender": (2, 92, 0),
     "location": "File > Import-Export",
     "description": "Export geometry as brushes",
     "category": "Import-Export",
@@ -75,9 +75,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         if mat:
             for node in mat.node_tree.nodes:
                 if node.type == 'TEX_IMAGE':
-                    width, height = node.image.size
-                    break
-            texstring = mat.name
+                    if node.image.has_data:
+                        width, height = node.image.size
+                        break
+            texstring = mat.name.replace(" ","_")
         else:
             texstring = self.option_skip
 
