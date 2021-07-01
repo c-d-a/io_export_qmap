@@ -18,7 +18,7 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2021, 6, 30),
+    "version": (2021, 7, 1),
     "blender": (2, 92, 0),
     "location": "File > Import-Export",
     "description": "Export geometry as brushes",
@@ -29,7 +29,7 @@ import bpy, bmesh, math
 from mathutils import Vector, Matrix
 from numpy.linalg import solve
 from bpy_extras.io_utils import ExportHelper
-from bpy.props import StringProperty, BoolProperty, FloatProperty, EnumProperty
+from bpy.props import *
 
 class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     bl_idname = 'export.map'
@@ -56,6 +56,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ('Clip', "Clipboard", "Store data in system buffer") ) )
     option_skip: StringProperty(name="Fallback", default='skip',
         description="Texture to use on new and unassigned faces")
+    option_precision: IntProperty(name="Precision", default=5,
+        description="Number of significant digits", min=0, soft_max=17)
 
     def gridsnap(self, vector):
         grid = self.option_grid
@@ -65,7 +67,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             return vector
 
     def printvec (self, vector):
-        return ' '.join([f'{co:.5g}' for co in vector])
+        return ' '.join([f'{co:.{self.option_precision}g}' for co in vector])
 
     def texdata(self, face, mesh, obj):
         mat = None
