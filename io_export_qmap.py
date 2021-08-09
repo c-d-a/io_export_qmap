@@ -18,14 +18,14 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2021, 7, 1),
-    "blender": (2, 92, 0),
+    "version": (2021, 8, 9),
+    "blender": (2, 93, 2),
     "location": "File > Import-Export",
     "description": "Export geometry as brushes",
     "category": "Import-Export",
 }
 
-import bpy, bmesh, math
+import bpy, bmesh, math, time
 from mathutils import Vector, Matrix
 from numpy.linalg import solve
 from bpy_extras.io_utils import ExportHelper
@@ -247,6 +247,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         return texstring
   
     def execute(self, context):
+        timer = time.time()
+        
         if self.option_sel:
             objects = context.selected_objects
         else:
@@ -357,6 +359,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         else:
             bpy.context.window_manager.clipboard = ''.join(geo)
 
+        timer = time.time() - timer
+        self.report({'INFO'},f"Finished exporting map, took {timer:g} sec")
         return {'FINISHED'}
 
 def menu_func_export(self, context):
