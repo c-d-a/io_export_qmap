@@ -56,7 +56,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ('Clip', "Clipboard", "Store data in system buffer") ) )
     option_skip: StringProperty(name="Fallback", default='skip',
         description="Texture to use on new and unassigned faces")
-    option_precision: IntProperty(name="Precision", default=5,
+    option_fp: IntProperty(name="Precision", default=5,
         description="Number of significant digits", min=0, soft_max=17)
 
     def gridsnap(self, vector):
@@ -67,7 +67,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             return vector
 
     def printvec (self, vector):
-        return ' '.join([f'{co:.{self.option_precision}g}' for co in vector])
+        return ' '.join([f'{co:.{self.option_fp}g}' for co in vector])
 
     def texdata(self, face, mesh, obj):
         mat = None
@@ -200,9 +200,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             world02 = V[2] - V[0]
 
             # 01 and 02 projected along the closest axis
-            maxn = max(abs(round(crd,5)) for crd in face.normal)
+            maxn = max(abs(round(crd,self.option_fp)) for crd in face.normal)
             for i in [2,0,1]: # axis priority for 45 degree angles
-                if round(abs(face.normal[i]),5) == maxn:
+                if round(abs(face.normal[i]),self.option_fp) == maxn:
                     axis = i
                     break
             world01_2d = Vector((world01[:axis] + world01[(axis+1):]))
