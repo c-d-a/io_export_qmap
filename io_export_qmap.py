@@ -38,6 +38,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     bl_options = {'UNDO'}
     filename_ext = ".map"
     filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
+    e_area = 4 # zero area epsilon
     e_col = 5 # collinearity epsilon
 
     option_sel: BoolProperty(name="Selection only", default=True)
@@ -300,20 +301,24 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
                                                 angle_limit=0.0)
             for face in bm.faces[:]:
-                fw('{\n')
-                for vert in reversed(face.verts[0:3]):
-                    fw(f'( {self.printvec(vert.co)} ) ')
-                fw(self.texdata(face, bm, mobj))
-                pyr = bmesh.ops.poke(bm, faces=[face],
-                            offset=-self.option_depth)
-                apex = pyr['verts'][0].co
-                pyr['verts'][0].co = self.gridsnap(apex)
-                for pyrface in pyr['faces']:
-                    for vert in pyrface.verts[0:3]: # backfacing
+                for loop in face.loops:
+                    if round(loop.calc_angle(), self.e_area) == 0:
+                        break # skip zero-area faces
+                else: # outer loop
+                    fw('{\n')
+                    for vert in reversed(face.verts[0:3]):
                         fw(f'( {self.printvec(vert.co)} ) ')
-                    pyrface.material_index = len(mobj.data.materials) - 1
-                    fw(self.texdata(pyrface, bm, mobj))
-                fw('}\n')
+                    fw(self.texdata(face, bm, mobj))
+                    pyr = bmesh.ops.poke(bm, faces=[face],
+                                offset=-self.option_depth)
+                    apex = pyr['verts'][0].co
+                    pyr['verts'][0].co = self.gridsnap(apex)
+                    for pyrface in pyr['faces']:
+                        for vert in pyrface.verts[0:3]: # backfacing
+                            fw(f'( {self.printvec(vert.co)} ) ')
+                        pyrface.material_index = len(mobj.data.materials) - 1
+                        fw(self.texdata(pyrface, bm, mobj))
+                    fw('}\n')
 
             bpy.data.objects.remove(mobj)
             for obj in orig_sel:
