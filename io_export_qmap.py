@@ -38,9 +38,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     bl_options = {'UNDO'}
     filename_ext = ".map"
     filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
+    e_col = 5 # collinearity epsilon
 
     option_sel: BoolProperty(name="Selection only", default=True)
     option_tm: BoolProperty(name="Apply transform", default=True)
+    option_tj: BoolProperty(name="Triangulate T-junctions", default=True)
     option_geo: EnumProperty(name="Geo", default='Faces',
         items=( ('Brushes', "Brushes", "Export each object as a convex brush"),
                 ('Faces', "Faces", "Export each face as a pyramid brush") ) )
@@ -281,6 +283,17 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             if self.option_tm:
                 bmesh.ops.transform(bm, matrix=obj.matrix_world,
                                                 verts=bm.verts)
+
+            # triangulate faces with mid-edge verts
+            if self.option_tj:
+                tjfaces = []
+                for face in bm.faces:
+                    for loop in face.loops:
+                        if round(loop.calc_angle() - math.pi, self.e_col) == 0:
+                            tjfaces.append(face)
+                            break
+                bmesh.ops.triangulate(bm, faces=tjfaces)
+
             for vert in bm.verts:
                 vert.co = self.gridsnap(vert.co)
             bmesh.ops.connect_verts_concave(bm, faces=bm.faces)
