@@ -231,21 +231,17 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             tformMtx = Matrix(( (mCoeffs[0], mCoeffs[1], 0),
                                 (mCoeffs[2], mCoeffs[3], 0),
                                 (0,          0,          1) ))
-            t0 = Vector((T[0].x * width, T[0].y * height)).to_3d()
-            v0 = Vector((V[0][:axis] + V[0][(axis+1):])).to_3d()
-
-            offset = t0 - ( tformMtx @ v0 )
             rotation = math.degrees(tformMtx.inverted_safe().to_euler().z)
-            scale = tformMtx.inverted_safe().to_scale() # always positive
+            scale = tformMtx.inverted_safe().to_scale() # never zero
+            scale.x *= math.copysign(1,tformMtx.determinant())
 
-            # Compare normals between UV and projection to get the scale sign
-            tn = tex01.to_3d().cross(tex02.to_3d())
-            vn = world01_2d.to_3d().cross(world02_2d.to_3d())
-            if tn.dot(vn) < 0: scale.x *= -1
-
-            # fudge
-            offset.x += width
-            offset.y *= -1
+            # Calculate offsets
+            t0 = Vector((T[0].x * width, T[0].y * height))
+            v0 = Vector((V[0][:axis] + V[0][(axis+1):]))
+            v0.rotate(Matrix.Rotation(math.radians(-rotation), 2))
+            v0 = Vector((v0.x/scale.x, v0.y/scale.y))
+            offset = t0 - v0
+            offset.y *= -1 # V is flipped
 
             finvals = [offset.x, offset.y, rotation, scale.x, scale.y]
             texstring += f" {self.printvec(finvals)}\n"
