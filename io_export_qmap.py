@@ -18,11 +18,12 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2021, 8, 9),
-    "blender": (2, 93, 2),
+    "version": (2022, 8, 27),
+    "blender": (3, 2, 2),
     "location": "File > Import-Export",
     "description": "Export geometry as brushes",
     "category": "Import-Export",
+    "tracker_url": "https://github.com/c-d-a/io_export_qmap"
 }
 
 import bpy, bmesh, math, time
@@ -351,7 +352,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 bm.clear()
 
         bm.free()
-        fw('}')
+        fw('}\n')
 
         if self.option_dest == 'File':
             with open(self.filepath, 'w') as file:
