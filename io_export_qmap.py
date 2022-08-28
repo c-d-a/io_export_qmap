@@ -29,6 +29,7 @@ bl_info = {
 import bpy, bmesh, math, time
 from mathutils import Vector, Matrix, geometry
 from numpy.linalg import solve
+from numpy import format_float_positional as fformat
 from bpy_extras.io_utils import ExportHelper
 from bpy.props import *
 
@@ -79,7 +80,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_gname: StringProperty(name="Generic name", default='func_group',
         description="Classname for brush entities, unless set otherwise")
     option_fp: IntProperty(name="Precision", default=5,
-        description="Number of significant digits", min=0, soft_max=17)
+        description="Number of decimal places", min=0, soft_max=17)
     seen_names = []
 
 
@@ -110,7 +111,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
 
     def printvec(self, vector):
-        return ' '.join([f'{co:.{self.option_fp}g}' for co in vector])
+        fstring = []
+        for co in vector:
+            fstring.append(fformat(co, precision=self.option_fp, trim='-'))
+        return ' '.join(fstring)
 
 
     def brushplane(self, face):
