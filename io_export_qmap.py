@@ -46,9 +46,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_geo: EnumProperty(name="Geo", default='Faces',
         items=( ('Brushes', "Brushes", "Export each object as a convex brush"),
                 ('Faces', "Faces", "Export each face as a pyramid brush") ) )
-    option_grid: FloatProperty(name="Grid", default=4.0,
+    option_grid: FloatProperty(name="Grid", default=1.0,
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
-    option_depth: FloatProperty(name="Depth", default=8.0,
+    option_depth: FloatProperty(name="Depth", default=2.0,
         description="Pyramid poke offset", min=0.0, max=256.0)
     option_format: EnumProperty(name="Format", default='Valve',
         items=( ('Quake', "Standard", "Axis-aligned texture projection"),
