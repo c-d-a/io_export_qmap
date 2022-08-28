@@ -52,7 +52,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         description="Pyramid poke offset", min=0.0, max=256.0)
     option_format: EnumProperty(name="Format", default='Valve',
         items=( ('Quake', "Standard", "Axis-aligned texture projection"),
-                ('Valve', "Valve220", "Face-bound texture projection") ) )
+                ('Valve', "Valve220", "Edge-bound texture projection"),
+                ('BPrim', "Primitives", "Plane-bound texture projection") ) )
     option_dest: EnumProperty(name="Save to", default='File',
         items=( ('File', "File", "Write data to a .map file"),
                 ('Clip', "Clipboard", "Store data in system buffer") ) )
@@ -243,6 +244,73 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             finvals = [offset.x, offset.y, rotation, scale.x, scale.y]
             texstring += f" {self.printvec(finvals)}\n"
 
+        elif self.option_format == 'BPrim':
+            # ( ( a1 a2 a3 ) ( a4 a5 a6 ) )
+            dummy = '( ( 0.0078125 0 0 ) ( 0 0.0078125 0 ) ) '
+            '''
+            Brush Primitives format
+
+            t = A * B * v, where:
+            t is the vertex in UV
+            v is the same vertex in 3D
+            B transforms world space so that X axis points along face normal
+            A is a homogenous matrix that transforms this new space to UV
+
+            B has to match the one arbitrarily chosen in editor and compiler
+            A has first two rows stored in map file and third row as (0 0 1)
+
+            t[i] = A * (B * v[i]) = A * vb[i]
+
+            for every vertex:
+            [ u ]   [ a1 a2 a3 ] [ xb ]
+            [ v ] = [ a4 a5 a6 ] [ yb ]
+            [ 1 ]   [ 0  0  1  ] [ zb ]
+
+            1 = zb
+            u = a1*xb + a2*yb + a3
+            v = a4*xb + a5*yb + a6
+
+            three verts, six unknowns, six equations
+            [ u1 ]   [ x1b y1b 1   0   0   0 ] [ a1 ]
+            [ v1 ] = [ 0   0   0   x1b y1b 1 ] [ a2 ]
+            [ u2 ]   [ x2b y2b 1   0   0   0 ] [ a3 ]
+            [ v2 ] = [ 0   0   0   x2b y2b 1 ] [ a4 ]
+            [ u3 ]   [ x3b y3b 1   0   0   0 ] [ a5 ]
+            [ v3 ] = [ 0   0   0   x3b y3b 1 ] [ a6 ]
+            '''
+            n = face.normal
+            # angle between the X axis and normal's projection onto XY plane
+            theta_z = math.atan2(n.y, n.x) if (1-abs(n.z) > 1e-7) else 0
+            # angle between the normal and its projection onto XY plane
+            theta_y = math.atan2(n.z, math.sqrt(n.x**2 + n.y**2))
+
+            # Brush Primitives specific matrix B, spins world around Z and Y
+            b11 = -math.sin(theta_z)
+            b12 = math.cos(theta_z)
+            b21 = math.sin(theta_y) * math.cos(theta_z)
+            b22 = math.sin(theta_y) * math.sin(theta_z)
+            b23 = -math.cos(theta_y)
+            B = Matrix(( (b11, b12, 0  ),
+                         (b21, b22, b23),
+                         (0,   0,   0  ) ))
+            VB = [B @ vert for vert in V]
+
+            # v is flipped
+            T6 = [ T[0].x, -T[0].y, T[1].x, -T[1].y, T[2].x, -T[2].y ]
+
+            M6 = [[VB[0].x, VB[0].y, 1,       0,       0,       0],
+                  [0,       0,       0,       VB[0].x, VB[0].y, 1],
+                  [VB[1].x, VB[1].y, 1,       0,       0,       0],
+                  [0,       0,       0,       VB[1].x, VB[1].y, 1],
+                  [VB[2].x, VB[2].y, 1,       0,       0,       0],
+                  [0,       0,       0,       VB[2].x, VB[2].y, 1]]
+            try:
+                A6 = solve(M6, T6)
+            except:
+                return dummy + texstring
+            # unlike other formats, coordinates go before the material name
+            texstring = f"( ( {self.printvec(A6[0:3])} )"\
+                        f"  ( {self.printvec(A6[3:6])} ) ) " + texstring + "\n"
         return texstring
   
     def execute(self, context):
@@ -260,6 +328,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         if self.option_format == 'Valve':
             fw('"mapversion" "220"\n')
         bm = bmesh.new()
+
+        if self.option_format == 'BPrim':
+            template = ['{\nbrushDef\n{\n', '}\n}\n']
+        else:
+            template = ['{\n', '}\n']
 
         if self.option_geo == 'Faces' and objects != []:
             orig_sel = context.selected_objects
@@ -298,7 +371,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             for face in bm.faces[:]:
                 if face.calc_area() <= 1e-4:
                     continue
-                fw('{\n')
+                fw(template[0])
                 for vert in reversed(face.verts[0:3]):
                     fw(f'( {self.printvec(vert.co)} ) ')
                 fw(self.texdata(face, bm, mobj))
@@ -311,7 +384,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                         fw(f'( {self.printvec(vert.co)} ) ')
                     pyrface.material_index = len(mobj.data.materials) - 1
                     fw(self.texdata(pyrface, bm, mobj))
-                fw('}\n')
+                fw(template[1])
 
             bpy.data.objects.remove(mobj)
             for obj in orig_sel:
@@ -338,12 +411,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                     angle_face_threshold=0.01, angle_shape_threshold=0.7)
                 bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
                                                     angle_limit=0.0)
-                fw('{\n')
+                fw(template[0])
                 for face in bm.faces:
                     for vert in reversed(face.verts[0:3]):
                         fw(f'( {self.printvec(vert.co)} ) ')
                     fw(self.texdata(face, bm, obj))
-                fw('}\n')
+                fw(template[1])
                 bm.clear()
 
         bm.free()
