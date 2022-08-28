@@ -44,12 +44,16 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_tm: BoolProperty(name="Apply transform", default=True)
     option_tj: BoolProperty(name="Triangulate 180°", default=True)
     option_geo: EnumProperty(name="Geo", default='Faces',
-        items=( ('Brushes', "Brushes", "Export each object as a convex brush"),
+        items=( ('Brush', "Brush", "Export each object as a convex brush"),
                 ('Faces', "Faces", "Export each face as a pyramid brush") ) )
     option_grid: FloatProperty(name="Grid", default=1.0,
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
     option_depth: FloatProperty(name="Depth", default=2.0,
         description="Pyramid poke offset", min=0.0, max=256.0)
+    option_group: EnumProperty(name="Name", default='Gen',
+        items=( ('None', "None", "Export loose worldspawn brushes"),
+                ('Auto', "Blender", "Use Blender name"),
+                ('Gen', "Generic", "Use generic name") ) )
     option_brush: EnumProperty(name="Planes", default='Quake',
         items=( ('Quake', "Quake", "Brush planes as three vertices"),
                 ('Doom3', "Doom 3", "Brush planes as normal + distance") ) )
@@ -63,10 +67,32 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_dest: EnumProperty(name="Save to", default='File',
         items=( ('File', "File", "Write data to a .map file"),
                 ('Clip', "Clipboard", "Store data in system buffer") ) )
-    option_skip: StringProperty(name="Fallback", default='skip',
-        description="Texture to use on new and unassigned faces")
+    option_skip: StringProperty(name="Generic material", default='skip',
+        description="Material to use on new and unassigned faces")
+    option_gname: StringProperty(name="Generic name", default='func_group',
+        description="Classname for brush entities, unless set otherwise")
     option_fp: IntProperty(name="Precision", default=5,
         description="Number of significant digits", min=0, soft_max=17)
+    seen_names = []
+
+
+    def entname(self, ent):
+        if self.option_group == 'None':
+            return ''
+        elif self.option_group == 'Gen':
+            tname = self.option_gname
+        elif self.option_group == 'Auto':
+            tname = ent.name.rstrip('0123456789')
+            tname = tname[:-1] if tname[-1] in ('.',' ') else ent.name
+
+        name = '}\n{\n"classname" "' + tname + '"\n'
+        if self.option_brush == 'Doom3':
+            self.seen_names.append(tname)
+            n_name = self.seen_names.count(tname)
+            name += '"name" "' + tname + f'_{n_name}"\n'
+            name += '"model" "' + tname + f'_{n_name}"\n'
+        return name
+
 
     def gridsnap(self, vector):
         grid = self.option_grid
@@ -75,9 +101,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         else:
             return vector
 
+
     def printvec(self, vector):
         return ' '.join([f'{co:.{self.option_fp}g}' for co in vector])
-        
+
+
     def brushplane(self, face):
         if self.option_brush == 'Quake':
             planestring = ""
@@ -90,6 +118,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                                     (.0,.0,.0), face.verts[0].co, face.normal)
             return f'( {self.printvec([co for co in face.normal] + [dist])} ) '
 
+
     def faceflags(self, obj):
         if self.option_flags == 'None':
             return "\n"
@@ -99,6 +128,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 return f" {1<<27} 0 0\n"
             else:
                 return " 0 0 0\n"
+
 
     def texdata(self, face, mesh, obj):
         mat = None
@@ -342,18 +372,70 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                         f"  ( {self.printvec(A6[3:6])} ) ) " + texstring
         return texstring
 
+
+    def process_object(self, obj, fw, template):
+        flags = self.faceflags(obj)
+        obj.data.materials.append(None) # empty slot for new faces
+        bm = bmesh.new()
+        bm.from_mesh(obj.data)
+        if self.option_tm:
+            bmesh.ops.transform(bm, matrix=obj.matrix_world,
+                                            verts=bm.verts)
+        for vert in bm.verts:
+            vert.co = self.gridsnap(vert.co)
+
+        if self.option_geo == 'Brush':
+            hull = bmesh.ops.convex_hull(bm, input=bm.verts)
+            interior = [face for face in bm.faces if face not in hull['geom']]
+            bmesh.ops.delete(bm, geom=interior, context='FACES')
+            bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
+            bmesh.ops.join_triangles(bm, faces=bm.faces,
+                angle_face_threshold=0.01, angle_shape_threshold=0.7)
+            bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
+                                                angle_limit=0.0)
+            fw(template[0])
+            for face in bm.faces:
+                fw(self.brushplane(face))
+                fw(self.texdata(face, bm, obj) + flags)
+            fw(template[1])
+
+        elif self.option_geo == 'Faces':
+            bmesh.ops.connect_verts_concave(bm, faces=bm.faces) # concave poly
+            if self.option_tj:
+                tjfaces = []
+                for face in bm.faces:
+                    for loop in face.loops:
+                        if abs(loop.calc_angle() - math.pi) <= 1e-4:
+                            tjfaces.append(face)
+                            break
+                bmesh.ops.triangulate(bm, faces=tjfaces) # mid-edge verts
+            bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
+                                            angle_limit=1e-3) # concave surface
+            for face in bm.faces[:]:
+                if face.calc_area() <= 1e-4:
+                    continue
+                fw(template[0])
+                fw(self.brushplane(face))
+                fw(self.texdata(face, bm, obj) + flags)
+                pyr = bmesh.ops.poke(bm, faces=[face],
+                            offset=-self.option_depth)
+                pyr['verts'][0].co = self.gridsnap(pyr['verts'][0].co)
+                for pyrface in pyr['faces']:
+                    pyrface.normal_flip()
+                    pyrface.material_index = len(obj.data.materials) - 1
+                    fw(self.brushplane(pyrface))
+                    fw(self.texdata(pyrface, bm, obj) + flags)
+                fw(template[1])
+
+        bm.free()
+        obj.data.materials.pop() # remove the empty slot
+
+
     def execute(self, context):
         timer = time.time()
-
-        if self.option_sel:
-            objects = context.selected_objects
-        else:
-            objects = context.scene.objects
-        objects = [obj for obj in objects if obj.type == 'MESH']
-
         geo = []
         fw = geo.append
-        bm = bmesh.new()
+        wspwn_objs, bmodel_objs = [],[]
 
         if self.option_brush == 'Doom3':
             fw('Version 2\n')
@@ -366,92 +448,34 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         if self.option_uv == 'Valve':
             fw('"mapversion" "220"\n')
 
-        if self.option_geo == 'Faces' and objects != []:
-            orig_sel = context.selected_objects
-            orig_act = context.active_object
-            if orig_act is not None:
-                orig_mode = orig_act.mode
-                bpy.ops.object.mode_set(mode='OBJECT')
-            bpy.ops.object.select_all(action='DESELECT')
-            for obj in objects:
-                obj.select_set(True)
-            context.view_layer.objects.active = objects[0]
-            bpy.ops.object.duplicate()
-            bpy.ops.object.join()
-            mobj = context.active_object
-            mobj.data.materials.append(None) # empty slot for new faces
-            flags = self.faceflags(mobj) # everything's merged! fix me later
-            bm.from_mesh(mobj.data)
+        if self.option_sel:
+            objects = context.selected_objects
+        else:
+            objects = context.scene.objects
+        for obj in objects:
+            if obj.type != 'MESH':
+                continue
+            if ((self.option_group == 'None')
+                or (self.option_group == 'Auto' and self.option_geo == 'Brush'
+                    and obj.users_collection[0].name.startswith('worldspawn'))
+                or (self.option_group == 'Auto' and self.option_geo != 'Brush'
+                    and obj.name.startswith('worldspawn'))):
+                        wspwn_objs.append(obj)
+            else:
+                bmodel_objs.append(obj)
 
-            if self.option_tm:
-                bmesh.ops.transform(bm, matrix=obj.matrix_world,
-                                                verts=bm.verts)
-
-            bmesh.ops.connect_verts_concave(bm, faces=bm.faces) # concave poly
-            if self.option_tj:
-                tjfaces = []
-                for face in bm.faces:
-                    for loop in face.loops:
-                        if abs(loop.calc_angle() - math.pi) <= 1e-4:
-                            tjfaces.append(face)
-                            break
-                bmesh.ops.triangulate(bm, faces=tjfaces) # mid-edge verts
-
-            for vert in bm.verts:
-                vert.co = self.gridsnap(vert.co)
-            bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
-                                            angle_limit=1e-3) # concave surface
-            for face in bm.faces[:]:
-                if face.calc_area() <= 1e-4:
-                    continue
-                fw(template[0])
-                fw(self.brushplane(face))
-                fw(self.texdata(face, bm, mobj) + flags)
-                pyr = bmesh.ops.poke(bm, faces=[face],
-                            offset=-self.option_depth)
-                apex = pyr['verts'][0].co
-                pyr['verts'][0].co = self.gridsnap(apex)
-                for pyrface in pyr['faces']:
-                    pyrface.normal_flip()
-                    pyrface.material_index = len(mobj.data.materials) - 1
-                    fw(self.brushplane(pyrface))
-                    fw(self.texdata(pyrface, bm, mobj) + flags)
-                fw(template[1])
-
-            bpy.data.objects.remove(mobj)
-            for obj in orig_sel:
-                obj.select_set(True)
-            context.view_layer.objects.active = orig_act
-            if orig_act is not None:
-                bpy.ops.object.mode_set(mode=orig_mode)
-
-        elif self.option_geo == 'Brushes':
-            for obj in objects:
-                flags = self.faceflags(obj)
-                bm.from_mesh(obj.data)
-                if self.option_tm:
-                    bmesh.ops.transform(bm, matrix=obj.matrix_world,
-                                                    verts=bm.verts)
-                for vert in bm.verts:
-                    vert.co = self.gridsnap(vert.co)
-                hull = bmesh.ops.convex_hull(bm, input=bm.verts,
-                                        use_existing_faces=True)
-                geom = hull['geom'] + hull['geom_holes']
-                oldfaces = [face for face in bm.faces if face not in geom]
-                bmesh.ops.delete(bm, geom=oldfaces, context='FACES')
-                bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
-                bmesh.ops.join_triangles(bm, faces=bm.faces,
-                    angle_face_threshold=0.01, angle_shape_threshold=0.7)
-                bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
-                                                    angle_limit=0.0)
-                fw(template[0])
-                for face in bm.faces:
-                    fw(self.brushplane(face))
-                    fw(self.texdata(face, bm, obj) + flags)
-                fw(template[1])
-                bm.clear()
-
-        bm.free()
+        for obj in wspwn_objs:
+            self.process_object(obj, fw, template)
+        collections = [bpy.context.scene.collection] + bpy.data.collections[:]
+        for col in collections:
+            if col.objects:
+                if self.option_geo == 'Brush':
+                    fw(self.entname(col))
+                for obj in col.objects:
+                    if obj in bmodel_objs:
+                        if self.option_geo != 'Brush':
+                            fw(self.entname(obj))
+                        self.process_object(obj, fw, template)
         fw('}\n')
 
         if self.option_dest == 'File':
