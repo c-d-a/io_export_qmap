@@ -18,7 +18,7 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2022, 8, 27),
+    "version": (2022, 8, 28),
     "blender": (3, 2, 2),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
@@ -748,30 +748,30 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         intensity = obj.data.energy
         radius = obj.data.shadow_soft_size
         origin = obj.matrix_world.to_translation() * self.option_scale
-        if self.option_lights == 'Auto': # 1 inch = 1 unit
-            intensity *= self.option_scale**2 / 40**2
         fw('{\n"classname" "light"\n')
         fw(f'"origin" "{self.printvec(origin)}"\n')
+        if self.option_lights == 'Auto':
+            intensity *= self.option_scale**2 / 40**2 # 1 inch = 1 unit
+            fw(f'"delay" "2"\n') # Q1: inverse-square attenuation
+            if radius != 0.25 : # skip unless modified by user
+                fw(f'"_deviance" "{(radius * self.option_scale):g}"\n')
         fw(f'"light" "{intensity:g}"\n')
         fw(f'"_color" "{self.printvec(obj.data.color)}"\n')
-        if radius != 0.25 : # skip unless modified by user
-            fw(f'"_deviance" "{(radius * self.option_scale):g}"\n')
-        fw(f'"delay" "2"\n') # Q1: inverse-square attenuation
         keys = obj.keys()
-        if obj.data.type == 'SPOT' and 'target' not in keys:
-            self.seen_names.append(self.spot_name)
-            spot_num = self.seen_names.count(self.spot_name)
-            spot_rot = obj.matrix_world.to_euler().to_matrix()
-            spot_org = spot_rot @ Vector((0,0,-self.spot_offset)) + origin
-            fw(f'"target" "{self.spot_name}{spot_num}"\n')
-            fw('}\n{\n')
-            fw(f'"classname" "{self.spot_class}"\n')
-            fw(f'"origin" "{self.printvec(spot_org)}"\n')
-            fw(f'"targetname" "{self.spot_name}{spot_num}"\n')
-        else:
-            for prop in keys:
-                if isinstance(obj[prop], (int, float, str)): # no arrays
-                    fw(f'"{prop}" "{obj[prop]}"\n')
+        for prop in keys:
+            if isinstance(obj[prop], (int, float, str)): # no arrays
+                fw(f'"{prop}" "{obj[prop]}"\n')
+        if obj.data.type == 'SPOT':
+            if ('target' not in keys) and ('mangle' not in keys):
+                self.seen_names.append(self.spot_name)
+                spot_num = self.seen_names.count(self.spot_name)
+                spot_rot = obj.matrix_world.to_euler().to_matrix()
+                spot_org = spot_rot @ Vector((0,0,-self.spot_offset)) + origin
+                fw(f'"target" "{self.spot_name}{spot_num}"\n')
+                fw('}\n{\n')
+                fw(f'"classname" "{self.spot_class}"\n')
+                fw(f'"origin" "{self.printvec(spot_org)}"\n')
+                fw(f'"targetname" "{self.spot_name}{spot_num}"\n')
         fw('}\n')
 
 
