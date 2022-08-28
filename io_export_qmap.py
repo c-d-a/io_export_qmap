@@ -21,7 +21,7 @@ bl_info = {
     "version": (2022, 8, 27),
     "blender": (3, 2, 2),
     "location": "File > Import-Export",
-    "description": "Export geometry as brushes",
+    "description": "Export scene to idTech map format",
     "category": "Import-Export",
     "tracker_url": "https://github.com/c-d-a/io_export_qmap"
 }
@@ -48,68 +48,226 @@ if sys.platform.startswith("win"):
     u32.OpenClipboard.argtypes = w32.HWND,
     u32.SetClipboardData.argtypes = w32.UINT, w32.HANDLE
 
+ptxt = {
+    'sel': {'name':"Selection only", 'def':True,
+        'desc':"Only export selected objects"},
+    'tm':  {"name":"Apply transform", "def":True,
+        "desc":"Apply current rotation, translation and scale"},
+    'mod': {"name":"Apply modifiers", "def":True,
+        "desc":"Apply modifiers before export, using their viewport settings"},
+    'tj': {"name":"Triangulate 180°", "def":True,
+        "desc":"Split faces with mid-edge vertices (for better UVs)"},
+
+    'geo': {"name":"Mesh", "def":'Faces',
+        "items":(
+            ('Brush',"Brush","Export each mesh as a single brush"\
+                "\n\nMore control, but takes more effort to prepare"\
+                "\nBy default, brushes are grouped by collection"),
+            ('Faces',"Faces","Export each face as a pyramid brush"\
+                "\n\nBest for detailed geometry, but hard to edit later"),
+            ('Prisms',"Walls","Export each face as an extruded prism brush"\
+                "\n\nBest for simple walls that you plan to edit afterwards"),
+            ('Soup',"Terrain","Export faces as vertically extruded poly soup"\
+                "\n\nExtrudes faces along Z to their lowest vert's height"\
+                "\nUseful when you want to save on collision planes"),
+            ('Blob',"Blob","Export faces as pyramids with a common apex"\
+                "\n\nPuts the shared apex at object's origin point"\
+                "\nUseful when you want a solid sealed convex-ish asteroid"),
+            ('Miter',"Shell","Export faces as a solidified shell"\
+                "\n\nExtrudes along vert normals, with miter joints inbetween"\
+                "\nUnreliable, as the resulting joints may be non-planar") )},
+    'nurbs': {"name":"Nurbs", "def":'Mesh',
+        "items":(
+            ('None', "Ignore", "Ignore NURBS surfaces"),
+            ('Mesh', "Mesh", "Convert NURBS to meshes, export as brushes"),
+            ('Def2', "Dynamic", "Export NURBS as patchDef2 patches"\
+                " (dynamic subdivision)\n\nFor a better preview in Blender:"\
+                "\nEnable Bezier, Endpoints, and set Order to 3x3"\
+                "\nSelect all points and set their W to 100 or higher"),
+            ('Def3', "Fixed", "Export NURBS as patchDef3 patches"\
+                " (explicit subdivision)\n\nFor a better preview in Blender:"\
+                "\nEnable Bezier, Endpoints, and set Order to 3x3"\
+                "\nSelect all points and set their W to 100 or higher") )},
+    'lights': {"name":"Light", "def":'Auto',
+        "items":(
+            ('None', "Ignore", "Ignore light objects"),
+            ('Auto', "Adaptive", "Export lights, approximate intensity"\
+                "\n\nScales light intensity with the scale of the scene"\
+                ", hopefully WYSIWYG.\nSpotlights automatically get a target"\
+                ", but their cone angle has to be set manually later"),
+            ('AsIs', "Explicit", "Export lights, use strength as is"\
+                "\n\nSpotlights automatically get a target"\
+                ", but their cone angle has to be set manually later") )},
+    'empties': {"name":"Empty", "def":'Point',
+        "items":(
+            ('None', "Ignore", "Ignore empty objects"),
+            ('Point', "Entities", "Export empties as point entities"\
+                "\n\nUses object name as 'classname', rotation as 'angles'"\
+                " and custom object properties as key/value pairs"\
+                "\nThis also exports cameras, maintaining their direction") )},
+
+    'grid': {"name":"Grid", "def":1.0,
+        "desc":"Grid size to snap coordinates to\n(0 = don't snap)"},
+    'depth': {"name":"Depth", "def":2.0,
+        "desc":"Offset for extrusion, pyramid apex and terrain bottom"\
+            "\n\nWhen using a larger grid, make sure to increase this as well"},
+    'scale': {"name":"Scale", "def":1.0,
+        "desc":"Scale factor for all 3D coordinates"\
+        "\n\n1 Quake unit is approximately 1 inch"\
+        "\nA scale of about 40-48 is appropriate for a scene in meters"},
+    'fp': {"name":"Precision", "def":5,
+        "desc":"Number of decimal places"},
+
+    'brush': {"name":"Planes", "def":'Quake',
+        "items":(
+            ('Quake', "Quake", "Brush planes as three vertices"\
+                "\n(Quake, Half-Life, Quake 2, Quake 3)"),
+            ('Doom3', "Doom 3", "Brush planes as normal + distance"\
+                "\n(Doom 3, Quake 4)") )},
+    'uv': {"name":"UVs", "def":'Valve',
+        "items":(
+            ('Quake', "Standard", "World-aligned texture projection"),
+            ('Valve', "Valve", "Edge-bound texture projection"),
+            ('BPrim', "Primitives", "Plane-bound texture projection") )},
+    'flags': {"name":"Flags", "def":'None',
+        "items":(
+            ('None', "None", "No flags"\
+                "\n(Quake, Half-Life, Quake 4)"),
+            ('Q2', "Quake 2", "Content, Surface, Value"\
+                "\n(Quake 2, Quake 3, Doom 3)"\
+                "\n\nIf an object or its collection has 'detail' in the name,"\
+                "\nevery face of that object will get marked as Detail" ) )},
+    'dest': {"name":"Output", "def":'File',
+        "items":(
+            ('File', "File", "Save to a .map file"),
+            ('Clip', "Text", "Store in text clipboard"\
+                "\n\nCan then be pasted in TrenchBroom"),
+            ('GTK', "GTK", "Store in GTK clipboard"\
+                "\n\nCan then be pasted in GTKRadiant, NetRadiant, etc") )},
+
+    'group': {"name":"Grouping", "def":'Gen',
+        "items":(
+            ('None', "None", "Export loose worldspawn brushes"),
+            ('Auto', "Blender", "Group under object/collection names"\
+                "\n\nTrailing numbers after the name will be removed\n"\
+                "Use 'worldspawn' name on objects you want to keep ungrouped"),
+            ('Gen', "Generic", "Group under generic classnames (set below)"))},
+    'gname': {"name":"Generic classname", "def":'func_group',
+        "desc":"Class name for brush entities, unless set otherwise"\
+            "\n\n  e.g.:\nfunc_group\nfunc_detail\n"},
+    'skip': {"name":"Generic material", "def":'skip',
+        "desc":"Material to use on new and unassigned faces"\
+            "\n\n  e.g.:\nskip\ntextures/common/caulk\n"}
+}
+
+class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
+    bl_idname = __name__
+
+    sel: BoolProperty(name=ptxt['sel']['name'],
+        default=ptxt['sel']['def'], description=ptxt['sel']['desc'])
+    tm: BoolProperty(name=ptxt['tm']['name'],
+        default=ptxt['tm']['def'], description=ptxt['tm']['desc'])
+    mod: BoolProperty(name=ptxt['mod']['name'],
+        default=ptxt['mod']['def'], description=ptxt['mod']['desc'])
+    tj: BoolProperty(name=ptxt['tj']['name'],
+        default=ptxt['tj']['def'], description=ptxt['tj']['desc'])
+    geo: EnumProperty(name=ptxt['geo']['name'],
+        default=ptxt['geo']['def'], items=ptxt['geo']['items'])
+    nurbs: EnumProperty(name=ptxt['nurbs']['name'],
+        default=ptxt['nurbs']['def'], items=ptxt['nurbs']['items'])
+    lights: EnumProperty(name=ptxt['lights']['name'],
+        default=ptxt['lights']['def'], items=ptxt['lights']['items'])
+    empties: EnumProperty(name=ptxt['empties']['name'],
+        default=ptxt['empties']['def'], items=ptxt['empties']['items'])
+    grid: FloatProperty(name=ptxt['grid']['name'], min=0,
+        default=ptxt['grid']['def'], description=ptxt['grid']['desc'])
+    depth: FloatProperty(name=ptxt['depth']['name'],
+        default=ptxt['depth']['def'], description=ptxt['depth']['desc'])
+    scale: FloatProperty(name=ptxt['scale']['name'],
+        default=ptxt['scale']['def'], description=ptxt['scale']['desc'])
+    fp: IntProperty(name=ptxt['fp']['name'], min=0, soft_max=17,
+        default=ptxt['fp']['def'], description=ptxt['fp']['desc'])
+    brush: EnumProperty(name=ptxt['brush']['name'],
+        default=ptxt['brush']['def'], items=ptxt['brush']['items'])
+    uv: EnumProperty(name=ptxt['uv']['name'],
+        default=ptxt['uv']['def'], items=ptxt['uv']['items'])
+    flags: EnumProperty(name=ptxt['flags']['name'],
+        default=ptxt['flags']['def'], items=ptxt['flags']['items'])
+    dest: EnumProperty(name=ptxt['dest']['name'],
+        default=ptxt['dest']['def'], items=ptxt['dest']['items'])
+    group: EnumProperty(name=ptxt['group']['name'],
+        default=ptxt['group']['def'], items=ptxt['group']['items'])
+    gname: StringProperty(name=ptxt['gname']['name'],
+        default=ptxt['gname']['def'], description=ptxt['gname']['desc'])
+    skip: StringProperty(name=ptxt['skip']['name'],
+        default=ptxt['skip']['def'], description=ptxt['skip']['desc'])
+
+    def draw(self, context):
+        self.layout.label(text="Default export settings", icon='PREFERENCES')
+        spl = self.layout.row().split(factor=0.22)
+        col = spl.column()
+        for p in ["grid", "depth", "scale", "fp"]: col.prop(self, p)
+        spl = spl.split(factor=0.33)
+        col = spl.column()
+        for p in ["geo", "nurbs", "lights", "empties"]: col.prop(self, p)
+        spl = spl.split(factor=0.5)
+        col = spl.column()
+        for p in ["brush", "uv", "flags", "dest"]: col.prop(self, p)
+        col = spl.column()
+        for p in ["sel", "tm", "mod", "tj"]: col.prop(self, p)
+        col = self.layout.column()
+        for p in ["group", "gname", "skip"]: col.prop(self, p)
+
+bpy.utils.register_class(ExportQuakeMapPreferences)
+
 
 class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     bl_idname = 'export.map'
     bl_label = bl_info['name']
     bl_description = bl_info['description']
-    bl_options = {'UNDO'}
+    bl_options = {'UNDO', 'PRESET'}
     filename_ext = ".map"
     filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
+    prefs = bpy.context.preferences.addons[__name__].preferences
 
-    option_sel: BoolProperty(name="Selection only", default=True)
-    option_tm: BoolProperty(name="Apply transform", default=True)
-    option_mod: BoolProperty(name="Apply modifiers", default=True)
-    option_tj: BoolProperty(name="Triangulate 180°", default=True)
-    option_geo: EnumProperty(name="Mesh", default='Faces',
-        items=( ('Brush', "Brush", "Export each mesh as a single brush"),
-                ('Faces', "Faces", "Export each face as a pyramid brush"),
-                ('Prisms', "Walls", "Export each face as a prism brush"),
-                ('Soup', "Terrain", "Export faces as poly-soup extruded on Z"),
-                ('Blob', "Blob", "Export as pyramids with a common apex"),
-                ('Miter', "Shell", "Export faces as a solidified shell") ) )
-    option_nurbs: EnumProperty(name="NURBS", default='Mesh',
-        items=( ('None', "Ignore", "Ignore NURBS surfaces"),
-                ('Mesh', "Mesh", "Convert NURBS to meshes, export as brushes"),
-                ('Def2', "Dynamic", "Export NURBS as patchDef2 patches"),
-                ('Def3', "Fixed", "Export NURBS as patchDef3 patches") ) )
-    option_lights: EnumProperty(name="Lights", default='Auto',
-        items=( ('None', "Ignore", "Ignore light objects"),
-                ('Auto', "Adaptive", "Export lights, approximate intensity"),
-                ('AsIs', "Explicit", "Export lights, use strength as is") ) )
-    option_empties: EnumProperty(name="Empties", default='Point',
-        items=( ('None', "Ignore", "Ignore empty objects"),
-                ('Point', "Entities", "Export empties as point entities") ) )
-    option_scale: FloatProperty(name="Scale", default=1.0,
-        description="Scale factor for all 3D coordinates")
-    option_grid: FloatProperty(name="Grid", default=1.0,
-        description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
-    option_depth: FloatProperty(name="Depth", default=2.0,
-        description="Pyramid poke offset", min=0.0, max=256.0)
-    option_group: EnumProperty(name="Name", default='Gen',
-        items=( ('None', "None", "Export loose worldspawn brushes"),
-                ('Auto', "Blender", "Use Blender name"),
-                ('Gen', "Generic", "Use generic name") ) )
-    option_brush: EnumProperty(name="Planes", default='Quake',
-        items=( ('Quake', "Quake", "Brush planes as three vertices"),
-                ('Doom3', "Doom 3", "Brush planes as normal + distance") ) )
-    option_uv: EnumProperty(name="UVs", default='Valve',
-        items=( ('Quake', "Standard", "Axis-aligned texture projection"),
-                ('Valve', "Valve220", "Edge-bound texture projection"),
-                ('BPrim', "Primitives", "Plane-bound texture projection") ) )
-    option_flags: EnumProperty(name="Flags", default='None',
-        items=( ('None', "None", "No flags"),
-                ('Q2', "Quake 2", "Content, Surface, Value") ) )
-    option_dest: EnumProperty(name="Save to", default='File',
-        items=( ('File', "File", "Write data to a .map file"),
-                ('Clip', "Text", "Store data in text clipboard"),
-                ('GTK', "GTK", "Store data in GTK clipboard") ) )
-    option_skip: StringProperty(name="Generic material", default='skip',
-        description="Material to use on new and unassigned faces")
-    option_gname: StringProperty(name="Generic name", default='func_group',
-        description="Classname for brush entities, unless set otherwise")
-    option_fp: IntProperty(name="Precision", default=5,
-        description="Number of decimal places", min=0, soft_max=17)
+    option_sel: BoolProperty(name=ptxt['sel']['name'],
+        default=prefs.sel, description=ptxt['sel']['desc'])
+    option_tm: BoolProperty(name=ptxt['tm']['name'],
+        default=prefs.tm, description=ptxt['tm']['desc'])
+    option_mod: BoolProperty(name=ptxt['mod']['name'],
+        default=prefs.mod, description=ptxt['mod']['desc'])
+    option_tj: BoolProperty(name=ptxt['tj']['name'],
+        default=prefs.tj, description=ptxt['tj']['desc'])
+    option_geo: EnumProperty(name=ptxt['geo']['name'],
+        default=prefs.geo, items=ptxt['geo']['items'])
+    option_nurbs: EnumProperty(name=ptxt['nurbs']['name'],
+        default=prefs.nurbs, items=ptxt['nurbs']['items'])
+    option_lights: EnumProperty(name=ptxt['lights']['name'],
+        default=prefs.lights, items=ptxt['lights']['items'])
+    option_empties: EnumProperty(name=ptxt['empties']['name'],
+        default=prefs.empties, items=ptxt['empties']['items'])
+    option_grid: FloatProperty(name=ptxt['grid']['name'], min=0,
+        default=prefs.grid, description=ptxt['grid']['desc'])
+    option_depth: FloatProperty(name=ptxt['depth']['name'],
+        default=prefs.depth, description=ptxt['depth']['desc'])
+    option_scale: FloatProperty(name=ptxt['scale']['name'],
+        default=prefs.scale, description=ptxt['scale']['desc'])
+    option_fp: IntProperty(name=ptxt['fp']['name'], min=0, soft_max=17,
+        default=prefs.fp, description=ptxt['fp']['desc'])
+    option_brush: EnumProperty(name=ptxt['brush']['name'],
+        default=prefs.brush, items=ptxt['brush']['items'])
+    option_uv: EnumProperty(name=ptxt['uv']['name'],
+        default=prefs.uv, items=ptxt['uv']['items'])
+    option_flags: EnumProperty(name=ptxt['flags']['name'],
+        default=prefs.flags, items=ptxt['flags']['items'])
+    option_dest: EnumProperty(name=ptxt['dest']['name'],
+        default=prefs.dest, items=ptxt['dest']['items'])
+    option_group: EnumProperty(name=ptxt['group']['name'],
+        default=prefs.group, items=ptxt['group']['items'])
+    option_gname: StringProperty(name=ptxt['gname']['name'],
+        default=prefs.gname, description=ptxt['gname']['desc'])
+    option_skip: StringProperty(name=ptxt['skip']['name'],
+        default=prefs.skip, description=ptxt['skip']['desc'])
 
     # all encountered names, including duplicates
     seen_names = []
@@ -117,6 +275,43 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     spot_name, spot_class, spot_offset = "spot_target_", "info_null", 64
     # export cameras as point entities, match entity's +X to camera's -Z
     cam_correct = Euler((-math.pi/2, 0, math.pi/2),'ZXY').to_matrix().to_4x4()
+
+
+    def draw(self, context):
+        o = "option_"
+        self.layout.separator()
+        spl = self.layout.row().split(factor=0.5)
+        col = spl.column()
+        for p in [o+"sel",o+"tm"]: col.prop(self, p)
+        col = spl.column()
+        for p in [o+"mod",o+"tj"]: col.prop(self, p)
+        self.layout.separator()
+        self.layout.label(text="Object types", icon='SCENE_DATA')
+        spl = self.layout.row().split(factor=0.5)
+        col = spl.column()
+        for p in [o+"geo",o+"nurbs"]: col.prop(self, p)
+        col = spl.column()
+        for p in [o+"lights",o+"empties"]: col.prop(self, p)
+        self.layout.separator()
+        self.layout.label(text="Coordinates", icon='MESH_DATA')
+        spl = self.layout.row().split(factor=0.5)
+        col = spl.column()
+        for p in [o+"grid",o+"depth"]: col.prop(self, p)
+        col = spl.column()
+        for p in [o+"scale",o+"fp"]: col.prop(self, p)
+        self.layout.separator()
+        self.layout.label(text="Output format", icon='UV_DATA')
+        spl = self.layout.row().split(factor=0.5)
+        col = spl.column()
+        for p in [o+"brush",o+"uv"]: col.prop(self, p)
+        col = spl.column()
+        for p in [o+"flags",o+"dest"]: col.prop(self, p)
+        self.layout.separator()
+        self.layout.label(text="Naming", icon='GROUP')
+        col = self.layout.column()
+        col.prop(self, o+"group")
+        col.prop(self, o+"gname", text="Class")
+        col.prop(self, o+"skip", text="Material")
 
 
     def entname(self, ent):
@@ -553,30 +748,30 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         intensity = obj.data.energy
         radius = obj.data.shadow_soft_size
         origin = obj.matrix_world.to_translation() * self.option_scale
+        if self.option_lights == 'Auto': # 1 inch = 1 unit
+            intensity *= self.option_scale**2 / 40**2
         fw('{\n"classname" "light"\n')
         fw(f'"origin" "{self.printvec(origin)}"\n')
-        if self.option_lights == 'Auto':
-            intensity *= self.option_scale**2 / 40**2 # 1 inch = 1 unit
-            fw(f'"delay" "2"\n') # Q1: inverse-square attenuation
-            if radius != 0.25 : # skip unless modified by user
-                fw(f'"_deviance" "{(radius * self.option_scale):g}"\n')
         fw(f'"light" "{intensity:g}"\n')
         fw(f'"_color" "{self.printvec(obj.data.color)}"\n')
+        if radius != 0.25 : # skip unless modified by user
+            fw(f'"_deviance" "{(radius * self.option_scale):g}"\n')
+        fw(f'"delay" "2"\n') # Q1: inverse-square attenuation
         keys = obj.keys()
-        for prop in keys:
-            if isinstance(obj[prop], (int, float, str)): # no arrays
-                fw(f'"{prop}" "{obj[prop]}"\n')
-        if obj.data.type == 'SPOT':
-            if ('target' not in keys) and ('mangle' not in keys):
-                self.seen_names.append(self.spot_name)
-                spot_num = self.seen_names.count(self.spot_name)
-                spot_rot = obj.matrix_world.to_euler().to_matrix()
-                spot_org = spot_rot @ Vector((0,0,-self.spot_offset)) + origin
-                fw(f'"target" "{self.spot_name}{spot_num}"\n')
-                fw('}\n{\n')
-                fw(f'"classname" "{self.spot_class}"\n')
-                fw(f'"origin" "{self.printvec(spot_org)}"\n')
-                fw(f'"targetname" "{self.spot_name}{spot_num}"\n')
+        if obj.data.type == 'SPOT' and 'target' not in keys:
+            self.seen_names.append(self.spot_name)
+            spot_num = self.seen_names.count(self.spot_name)
+            spot_rot = obj.matrix_world.to_euler().to_matrix()
+            spot_org = spot_rot @ Vector((0,0,-self.spot_offset)) + origin
+            fw(f'"target" "{self.spot_name}{spot_num}"\n')
+            fw('}\n{\n')
+            fw(f'"classname" "{self.spot_class}"\n')
+            fw(f'"origin" "{self.printvec(spot_org)}"\n')
+            fw(f'"targetname" "{self.spot_name}{spot_num}"\n')
+        else:
+            for prop in keys:
+                if isinstance(obj[prop], (int, float, str)): # no arrays
+                    fw(f'"{prop}" "{obj[prop]}"\n')
         fw('}\n')
 
 
@@ -711,4 +906,5 @@ def register():
 
 def unregister():
     bpy.utils.unregister_class(ExportQuakeMap)
+    bpy.utils.unregister_class(ExportQuakeMapPreferences)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
