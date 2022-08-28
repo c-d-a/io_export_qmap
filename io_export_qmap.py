@@ -44,7 +44,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     option_sel: BoolProperty(name="Selection only", default=True)
     option_tm: BoolProperty(name="Apply transform", default=True)
-    option_tj: BoolProperty(name="Triangulate T-junctions", default=True)
+    option_tj: BoolProperty(name="Triangulate 180°", default=True)
     option_geo: EnumProperty(name="Geo", default='Faces',
         items=( ('Brushes', "Brushes", "Export each object as a convex brush"),
                 ('Faces', "Faces", "Export each face as a pyramid brush") ) )
@@ -283,6 +283,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 bmesh.ops.transform(bm, matrix=obj.matrix_world,
                                                 verts=bm.verts)
 
+            bmesh.ops.connect_verts_concave(bm, faces=bm.faces)
             # triangulate faces with mid-edge verts
             if self.option_tj:
                 tjfaces = []
@@ -295,7 +296,6 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
             for vert in bm.verts:
                 vert.co = self.gridsnap(vert.co)
-            bmesh.ops.connect_verts_concave(bm, faces=bm.faces)
             bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
                                                 angle_limit=0.0)
             for face in bm.faces[:]:
