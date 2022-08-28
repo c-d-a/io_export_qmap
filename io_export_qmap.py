@@ -48,7 +48,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ('Faces', "Faces", "Export each face as a pyramid brush"),
                 ('Prisms', "Walls", "Export each face as a prism brush"),
                 ('Soup', "Terrain", "Export faces as poly-soup extruded on Z"),
-                ('Blob', "Blob", "Export as pyramids with a common apex") ) )
+                ('Blob', "Blob", "Export as pyramids with a common apex"),
+                ('Miter', "Shell", "Export faces as a solidified shell") ) )
     option_grid: FloatProperty(name="Grid", default=1.0,
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
     option_depth: FloatProperty(name="Depth", default=2.0,
@@ -425,27 +426,35 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(template[0])
                 fw(self.brushplane(face))
                 fw(self.texdata(face, bm, obj) + flags) # write original face
-                
+
                 if self.option_geo in ('Faces', 'Blob'):
                     new = bmesh.ops.poke(bm, faces=[face],
                                 offset=-self.option_depth)
                     if self.option_geo == 'Blob':
                         new['verts'][0].co = origin
-                    else:
+                    elif self.option_geo == 'Faces':
                         new['verts'][0].co = self.gridsnap(new['verts'][0].co)
-                elif self.option_geo in ('Prisms', 'Soup'):
-                    fnormal = face.normal
-                    new = bmesh.ops.extrude_discrete_faces(bm, faces=[face])
+
+                elif self.option_geo in ('Prisms', 'Soup', 'Miter'):
+                    clone = face.copy() # keep original face & vertex normals
+                    new = bmesh.ops.extrude_discrete_faces(bm, faces=[clone])
+                    new_verts = new['faces'][0].verts
+
                     if self.option_geo == 'Prisms':
-                        bmesh.ops.translate(bm, vec=fnormal*-self.option_depth,
-                                                verts=new['faces'][0].verts)
+                        bmesh.ops.translate(bm, verts=new_verts,
+                            vec=face.normal * -self.option_depth)
                     elif self.option_geo == 'Soup':
-                        for vert in new['faces'][0].verts:
+                        for vert in new_verts:
                             vert.co.z = bottom
+                    elif self.option_geo == 'Miter':
+                        for new_v, orig_v in zip(new_verts, face.verts):
+                            new_v.co -= (orig_v.normal * 
+                                orig_v.calc_shell_factor() * self.option_depth)
+
                     geom = bmesh.ops.region_extend(bm, use_faces=True,
                                                     geom=new['faces'])
                     new['faces'].extend(geom['geom'])
-                    
+
                 for newface in new['faces']: # write new faces
                     newface.normal_flip()
                     newface.material_index = len(obj.data.materials) - 1
