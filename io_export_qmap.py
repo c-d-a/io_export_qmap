@@ -42,6 +42,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     option_sel: BoolProperty(name="Selection only", default=True)
     option_tm: BoolProperty(name="Apply transform", default=True)
+    option_mod: BoolProperty(name="Apply modifiers", default=True)
     option_tj: BoolProperty(name="Triangulate 180°", default=True)
     option_geo: EnumProperty(name="Geo", default='Faces',
         items=( ('Brush', "Brush", "Export each object as a single brush"),
@@ -382,6 +383,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     def process_object(self, obj, fw, template):
         flags = self.faceflags(obj)
         origin = self.gridsnap(obj.matrix_world.translation)
+        if self.option_mod:
+            obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
         obj.data.materials.append(None) # empty slot for new faces
         bm = bmesh.new()
         bm.from_mesh(obj.data)
