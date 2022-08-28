@@ -27,7 +27,7 @@ bl_info = {
 }
 
 import bpy, bmesh, math, time
-from mathutils import Vector, Matrix, geometry
+from mathutils import Vector, Matrix, Euler, geometry
 from numpy.linalg import solve
 from numpy import format_float_positional as fformat
 from bpy_extras.io_utils import ExportHelper
@@ -61,6 +61,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         items=( ('None', "Ignore", "Ignore light objects"),
                 ('Auto', "Adaptive", "Export lights, approximate intensity"),
                 ('AsIs', "Explicit", "Export lights, use strength as is") ) )
+    option_empties: EnumProperty(name="Empties", default='Point',
+        items=( ('None', "Ignore", "Ignore empty objects"),
+                ('Point', "Entities", "Export empties as point entities") ) )
     option_scale: FloatProperty(name="Scale", default=1.0,
         description="Scale factor for all 3D coordinates")
     option_grid: FloatProperty(name="Grid", default=1.0,
@@ -90,8 +93,13 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         description="Classname for brush entities, unless set otherwise")
     option_fp: IntProperty(name="Precision", default=5,
         description="Number of decimal places", min=0, soft_max=17)
+
+    # all encountered names, including duplicates
     seen_names = []
+    # offset spotlight targets by 64 units, regardless of chosen scale
     spot_name, spot_class, spot_offset = "spot_target_", "info_null", 64
+    # export cameras as point entities, match entity's +X to camera's -Z
+    cam_correct = Euler((-math.pi/2, 0, math.pi/2),'ZXY').to_matrix().to_4x4()
 
 
     def entname(self, ent):
@@ -555,12 +563,32 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         fw('}\n')
 
 
+    def process_empty(self, obj, fw):
+        name = obj.name.rstrip('0123456789')
+        name = name[:-1] if name[-1] in ('.',' ') else obj.name
+        fw('{\n"classname" "' + name + '"\n')
+        origin = obj.matrix_world.to_translation() * self.option_scale
+        fw(f'"origin" "{self.printvec(origin)}"\n')
+        keys = obj.keys()
+        if 'angles' not in keys:
+            if obj.type != 'CAMERA':
+                ang = obj.matrix_world.to_euler()
+            else:
+                ang = (obj.matrix_world @ self.cam_correct).to_euler()
+            deg = (math.degrees(a) for a in (-ang.y, ang.z, ang.x))
+            fw(f'"angles" "{self.printvec(deg)}"\n')
+        for prop in keys:
+            if isinstance(obj[prop], (int, float, str)): # no arrays
+                fw(f'"{prop}" "{obj[prop]}"\n')
+        fw('}\n')
+
+
     def execute(self, context):
         timer = time.time()
         geo = []
         fw = geo.append
         wspwn_objs, bmodel_objs = [],[]
-        patch_objs, light_objs = [],[]
+        patch_objs, light_objs, empty_objs = [],[],[]
 
         if self.option_brush == 'Doom3':
             fw('Version 2\n')
@@ -581,6 +609,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             if obj.type == 'LIGHT' and self.option_lights != 'None':
                 light_objs.append(obj)
                 continue
+            elif obj.type in ('EMPTY','CAMERA'):
+                if self.option_empties != 'None':
+                    empty_objs.append(obj)
+                    continue
             elif obj.type == 'SURFACE':
                 if self.option_nurbs in ('Def2','Def3'):
                     patch_objs.append(obj)
@@ -616,6 +648,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         fw('}\n')
         for obj in light_objs:
             self.process_light(obj, fw)
+        for obj in empty_objs:
+            self.process_empty(obj, fw)
 
         if self.option_dest == 'File':
             with open(self.filepath, 'w') as file:
