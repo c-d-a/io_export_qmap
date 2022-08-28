@@ -50,6 +50,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ('Soup', "Terrain", "Export faces as poly-soup extruded on Z"),
                 ('Blob', "Blob", "Export as pyramids with a common apex"),
                 ('Miter', "Shell", "Export faces as a solidified shell") ) )
+    option_scale: FloatProperty(name="Scale", default=1.0,
+        description="Scale factor for all 3D coordinates")
     option_grid: FloatProperty(name="Grid", default=1.0,
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
     option_depth: FloatProperty(name="Depth", default=2.0,
@@ -387,7 +389,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             bmesh.ops.transform(bm, matrix=obj.matrix_world,
                                             verts=bm.verts)
         for vert in bm.verts:
-            vert.co = self.gridsnap(vert.co)
+            vert.co = self.gridsnap(vert.co * self.option_scale)
 
         if self.option_geo == 'Brush':
             hull = bmesh.ops.convex_hull(bm, input=bm.verts)
@@ -448,7 +450,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                             vert.co.z = bottom
                     elif self.option_geo == 'Miter':
                         for new_v, orig_v in zip(new_verts, face.verts):
-                            new_v.co -= (orig_v.normal * 
+                            new_v.co -= (orig_v.normal *
                                 orig_v.calc_shell_factor() * self.option_depth)
 
                     geom = bmesh.ops.region_extend(bm, use_faces=True,
