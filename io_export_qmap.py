@@ -27,7 +27,7 @@ bl_info = {
 }
 
 import bpy, bmesh, math, time
-from mathutils import Vector, Matrix
+from mathutils import Vector, Matrix, geometry
 from numpy.linalg import solve
 from bpy_extras.io_utils import ExportHelper
 from bpy.props import *
@@ -50,6 +50,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
     option_depth: FloatProperty(name="Depth", default=2.0,
         description="Pyramid poke offset", min=0.0, max=256.0)
+    option_brush: EnumProperty(name="Planes", default='Quake',
+        items=( ('Quake', "Quake", "Brush planes as three vertices"),
+                ('Doom3', "Doom 3", "Brush planes as normal + distance") ) )
     option_uv: EnumProperty(name="UVs", default='Valve',
         items=( ('Quake', "Standard", "Axis-aligned texture projection"),
                 ('Valve', "Valve220", "Edge-bound texture projection"),
@@ -74,6 +77,18 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     def printvec(self, vector):
         return ' '.join([f'{co:.{self.option_fp}g}' for co in vector])
+        
+    def brushplane(self, face):
+        if self.option_brush == 'Quake':
+            planestring = ""
+            for vert in reversed(face.verts[0:3]):
+                planestring += f'( {self.printvec(vert.co)} ) '
+            return planestring
+        elif self.option_brush == 'Doom3':
+            # more accurate than just the dot product
+            dist = geometry.distance_point_to_plane(
+                                    (.0,.0,.0), face.verts[0].co, face.normal)
+            return f'( {self.printvec([co for co in face.normal] + [dist])} ) '
 
     def faceflags(self, obj):
         if self.option_flags == 'None':
@@ -100,6 +115,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             texstring = mat.name.replace(" ","_")
         else:
             texstring = self.option_skip
+        if self.option_brush == 'Doom3':
+            texstring = f'"{texstring}"'
 
         V = [loop.vert.co for loop in face.loops]
         uv_layer = mesh.loops.layers.uv.active
@@ -210,7 +227,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             world02 = V[2] - V[0]
 
             # 01 and 02 projected along the closest axis
-            maxn = max(abs(round(crd,self.option_fp)) for crd in face.normal)
+            maxn = max( abs(round(co,self.option_fp)) for co in face.normal )
             for i in [2,0,1]: # axis priority for 45 degree angles
                 if round(abs(face.normal[i]),self.option_fp) == maxn:
                     axis = i
@@ -336,15 +353,18 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
         geo = []
         fw = geo.append
-        fw('{\n"classname" "worldspawn"\n')
-        if self.option_uv == 'Valve':
-            fw('"mapversion" "220"\n')
         bm = bmesh.new()
 
-        if self.option_uv == 'BPrim':
+        if self.option_brush == 'Doom3':
+            fw('Version 2\n')
+            template = ['{\nbrushDef3\n{\n', '}\n}\n']
+        elif self.option_uv == 'BPrim':
             template = ['{\nbrushDef\n{\n', '}\n}\n']
         else:
             template = ['{\n', '}\n']
+        fw('{\n"classname" "worldspawn"\n')
+        if self.option_uv == 'Valve':
+            fw('"mapversion" "220"\n')
 
         if self.option_geo == 'Faces' and objects != []:
             orig_sel = context.selected_objects
@@ -385,17 +405,16 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 if face.calc_area() <= 1e-4:
                     continue
                 fw(template[0])
-                for vert in reversed(face.verts[0:3]):
-                    fw(f'( {self.printvec(vert.co)} ) ')
+                fw(self.brushplane(face))
                 fw(self.texdata(face, bm, mobj) + flags)
                 pyr = bmesh.ops.poke(bm, faces=[face],
                             offset=-self.option_depth)
                 apex = pyr['verts'][0].co
                 pyr['verts'][0].co = self.gridsnap(apex)
                 for pyrface in pyr['faces']:
-                    for vert in pyrface.verts[0:3]: # backfacing
-                        fw(f'( {self.printvec(vert.co)} ) ')
+                    pyrface.normal_flip()
                     pyrface.material_index = len(mobj.data.materials) - 1
+                    fw(self.brushplane(pyrface))
                     fw(self.texdata(pyrface, bm, mobj) + flags)
                 fw(template[1])
 
@@ -427,8 +446,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                                                     angle_limit=0.0)
                 fw(template[0])
                 for face in bm.faces:
-                    for vert in reversed(face.verts[0:3]):
-                        fw(f'( {self.printvec(vert.co)} ) ')
+                    fw(self.brushplane(face))
                     fw(self.texdata(face, bm, obj) + flags)
                 fw(template[1])
                 bm.clear()
