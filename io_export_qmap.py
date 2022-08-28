@@ -57,6 +57,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ('Mesh', "Mesh", "Convert NURBS to meshes, export as brushes"),
                 ('Def2', "Dynamic", "Export NURBS as patchDef2 patches"),
                 ('Def3', "Fixed", "Export NURBS as patchDef3 patches") ) )
+    option_lights: EnumProperty(name="Lights", default='Auto',
+        items=( ('None', "Ignore", "Ignore light objects"),
+                ('Auto', "Adaptive", "Export lights, approximate intensity"),
+                ('AsIs', "Explicit", "Export lights, use strength as is") ) )
     option_scale: FloatProperty(name="Scale", default=1.0,
         description="Scale factor for all 3D coordinates")
     option_grid: FloatProperty(name="Grid", default=1.0,
@@ -87,6 +91,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_fp: IntProperty(name="Precision", default=5,
         description="Number of decimal places", min=0, soft_max=17)
     seen_names = []
+    spot_name, spot_class, spot_offset = "spot_target_", "info_null", 64
 
 
     def entname(self, ent):
@@ -519,12 +524,43 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         fw(")\n}\n}\n")
 
 
+    def process_light(self, obj, fw):
+        intensity = obj.data.energy
+        radius = obj.data.shadow_soft_size
+        origin = obj.matrix_world.to_translation() * self.option_scale
+        fw('{\n"classname" "light"\n')
+        fw(f'"origin" "{self.printvec(origin)}"\n')
+        if self.option_lights == 'Auto':
+            intensity *= self.option_scale**2 / 40**2 # 1 inch = 1 unit
+            fw(f'"delay" "2"\n') # Q1: inverse-square attenuation
+            if radius != 0.25 : # skip unless modified by user
+                fw(f'"_deviance" "{(radius * self.option_scale):g}"\n')
+        fw(f'"light" "{intensity:g}"\n')
+        fw(f'"_color" "{self.printvec(obj.data.color)}"\n')
+        keys = obj.keys()
+        for prop in keys:
+            if isinstance(obj[prop], (int, float, str)): # no arrays
+                fw(f'"{prop}" "{obj[prop]}"\n')
+        if obj.data.type == 'SPOT':
+            if ('target' not in keys) and ('mangle' not in keys):
+                self.seen_names.append(self.spot_name)
+                spot_num = self.seen_names.count(self.spot_name)
+                spot_rot = obj.matrix_world.to_euler().to_matrix()
+                spot_org = spot_rot @ Vector((0,0,-self.spot_offset)) + origin
+                fw(f'"target" "{self.spot_name}{spot_num}"\n')
+                fw('}\n{\n')
+                fw(f'"classname" "{self.spot_class}"\n')
+                fw(f'"origin" "{self.printvec(spot_org)}"\n')
+                fw(f'"targetname" "{self.spot_name}{spot_num}"\n')
+        fw('}\n')
+
+
     def execute(self, context):
         timer = time.time()
         geo = []
         fw = geo.append
         wspwn_objs, bmodel_objs = [],[]
-        patch_objs = []
+        patch_objs, light_objs = [],[]
 
         if self.option_brush == 'Doom3':
             fw('Version 2\n')
@@ -542,7 +578,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         else:
             objects = context.scene.objects
         for obj in objects:
-            if obj.type == 'SURFACE':
+            if obj.type == 'LIGHT' and self.option_lights != 'None':
+                light_objs.append(obj)
+                continue
+            elif obj.type == 'SURFACE':
                 if self.option_nurbs in ('Def2','Def3'):
                     patch_objs.append(obj)
                     continue
@@ -575,6 +614,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                             fw(self.entname(obj))
                         self.process_mesh(obj, fw, template)
         fw('}\n')
+        for obj in light_objs:
+            self.process_light(obj, fw)
 
         if self.option_dest == 'File':
             with open(self.filepath, 'w') as file:
