@@ -44,8 +44,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_tm: BoolProperty(name="Apply transform", default=True)
     option_tj: BoolProperty(name="Triangulate 180°", default=True)
     option_geo: EnumProperty(name="Geo", default='Faces',
-        items=( ('Brush', "Brush", "Export each object as a convex brush"),
-                ('Faces', "Faces", "Export each face as a pyramid brush") ) )
+        items=( ('Brush', "Brush", "Export each object as a single brush"),
+                ('Faces', "Faces", "Export each face as a pyramid brush"),
+                ('Prisms', "Walls", "Export each face as a prism brush"),
+                ('Soup', "Terrain", "Export faces as poly-soup extruded on Z"),
+                ('Blob', "Blob", "Export as pyramids with a common apex") ) )
     option_grid: FloatProperty(name="Grid", default=1.0,
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
     option_depth: FloatProperty(name="Depth", default=2.0,
@@ -375,6 +378,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     def process_object(self, obj, fw, template):
         flags = self.faceflags(obj)
+        origin = self.gridsnap(obj.matrix_world.translation)
         obj.data.materials.append(None) # empty slot for new faces
         bm = bmesh.new()
         bm.from_mesh(obj.data)
@@ -399,7 +403,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(self.texdata(face, bm, obj) + flags)
             fw(template[1])
 
-        elif self.option_geo == 'Faces':
+        else: # export individual faces
             bmesh.ops.connect_verts_concave(bm, faces=bm.faces) # concave poly
             if self.option_tj:
                 tjfaces = []
@@ -411,20 +415,42 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 bmesh.ops.triangulate(bm, faces=tjfaces) # mid-edge verts
             bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
                                             angle_limit=1e-3) # concave surface
+            if self.option_geo == 'Soup':
+                bottom = min(vert.co.z for vert in bm.verts)
+                bottom = self.gridsnap(bottom - self.option_depth)
+
             for face in bm.faces[:]:
                 if face.calc_area() <= 1e-4:
                     continue
                 fw(template[0])
                 fw(self.brushplane(face))
-                fw(self.texdata(face, bm, obj) + flags)
-                pyr = bmesh.ops.poke(bm, faces=[face],
-                            offset=-self.option_depth)
-                pyr['verts'][0].co = self.gridsnap(pyr['verts'][0].co)
-                for pyrface in pyr['faces']:
-                    pyrface.normal_flip()
-                    pyrface.material_index = len(obj.data.materials) - 1
-                    fw(self.brushplane(pyrface))
-                    fw(self.texdata(pyrface, bm, obj) + flags)
+                fw(self.texdata(face, bm, obj) + flags) # write original face
+                
+                if self.option_geo in ('Faces', 'Blob'):
+                    new = bmesh.ops.poke(bm, faces=[face],
+                                offset=-self.option_depth)
+                    if self.option_geo == 'Blob':
+                        new['verts'][0].co = origin
+                    else:
+                        new['verts'][0].co = self.gridsnap(new['verts'][0].co)
+                elif self.option_geo in ('Prisms', 'Soup'):
+                    fnormal = face.normal
+                    new = bmesh.ops.extrude_discrete_faces(bm, faces=[face])
+                    if self.option_geo == 'Prisms':
+                        bmesh.ops.translate(bm, vec=fnormal*-self.option_depth,
+                                                verts=new['faces'][0].verts)
+                    elif self.option_geo == 'Soup':
+                        for vert in new['faces'][0].verts:
+                            vert.co.z = bottom
+                    geom = bmesh.ops.region_extend(bm, use_faces=True,
+                                                    geom=new['faces'])
+                    new['faces'].extend(geom['geom'])
+                    
+                for newface in new['faces']: # write new faces
+                    newface.normal_flip()
+                    newface.material_index = len(obj.data.materials) - 1
+                    fw(self.brushplane(newface))
+                    fw(self.texdata(newface, bm, obj) + flags)
                 fw(template[1])
 
         bm.free()
