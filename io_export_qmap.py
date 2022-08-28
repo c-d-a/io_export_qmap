@@ -33,6 +33,22 @@ from numpy import format_float_positional as fformat
 from bpy_extras.io_utils import ExportHelper
 from bpy.props import *
 
+# clipboard stuff
+import sys, struct, ctypes
+if sys.platform.startswith("win"):
+    from ctypes import wintypes as w32
+    k32 = ctypes.windll.kernel32
+    u32 = ctypes.windll.user32
+    k32.GlobalAlloc.argtypes = w32.UINT, ctypes.c_size_t
+    k32.GlobalAlloc.restype = w32.HGLOBAL
+    k32.GlobalLock.argtypes = w32.HGLOBAL,
+    k32.GlobalLock.restype = w32.LPVOID
+    k32.GlobalUnlock.argtypes = w32.HGLOBAL,
+    k32.RtlCopyMemory.argtypes = w32.LPVOID, w32.LPCVOID, ctypes.c_size_t
+    u32.OpenClipboard.argtypes = w32.HWND,
+    u32.SetClipboardData.argtypes = w32.UINT, w32.HANDLE
+
+
 class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     bl_idname = 'export.map'
     bl_label = bl_info['name']
@@ -86,7 +102,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ('Q2', "Quake 2", "Content, Surface, Value") ) )
     option_dest: EnumProperty(name="Save to", default='File',
         items=( ('File', "File", "Write data to a .map file"),
-                ('Clip', "Clipboard", "Store data in system buffer") ) )
+                ('Clip', "Text", "Store data in text clipboard"),
+                ('GTK', "GTK", "Store data in GTK clipboard") ) )
     option_skip: StringProperty(name="Generic material", default='skip',
         description="Material to use on new and unassigned faces")
     option_gname: StringProperty(name="Generic name", default='func_group',
@@ -585,8 +602,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     def execute(self, context):
         timer = time.time()
-        geo = []
-        fw = geo.append
+        map_text = []
+        fw = map_text.append
         wspwn_objs, bmodel_objs = [],[]
         patch_objs, light_objs, empty_objs = [],[],[]
 
@@ -601,6 +618,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         if self.option_uv == 'Valve':
             fw('"mapversion" "220"\n')
 
+        # sort objects
         if self.option_sel:
             objects = context.selected_objects
         else:
@@ -630,6 +648,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             else:
                 bmodel_objs.append(obj)
 
+        # process objects
         for obj in wspwn_objs:
             self.process_mesh(obj, fw, template)
         for obj in patch_objs:
@@ -651,11 +670,32 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         for obj in empty_objs:
             self.process_empty(obj, fw)
 
+        # handle output
+        scene_str = ''.join(map_text)
         if self.option_dest == 'File':
             with open(self.filepath, 'w') as file:
-                file.write(''.join(geo))
-        else:
-            bpy.context.window_manager.clipboard = ''.join(geo)
+                file.write(scene_str)
+        elif self.option_dest == 'Clip':
+            bpy.context.window_manager.clipboard = scene_str
+        elif self.option_dest == 'GTK':
+            gtk_str = struct.pack('<Q',len(scene_str)) + scene_str.encode()
+            if sys.platform.startswith("win"):
+                clipid = u32.RegisterClipboardFormatW("RadiantClippings")
+                handle = k32.GlobalAlloc(0x0042, len(gtk_str))
+                pointer = k32.GlobalLock(handle)
+                try:
+                    k32.RtlCopyMemory(pointer, gtk_str, len(gtk_str))
+                    u32.OpenClipboard(u32.GetActiveWindow())
+                    u32.EmptyClipboard()
+                    u32.SetClipboardData(clipid, handle)
+                except:
+                    self.report({'ERROR'},"Failed to export GTK clipboard")
+                finally:
+                    k32.GlobalUnlock(pointer)
+                    u32.CloseClipboard()
+            else:
+                self.report({'ERROR'},"GTK export is currently Windows-only")
+                bpy.context.window_manager.clipboard = scene_str
 
         timer = time.time() - timer
         self.report({'INFO'},f"Finished exporting map, took {timer:g} sec")
