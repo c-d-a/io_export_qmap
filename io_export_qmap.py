@@ -39,8 +39,6 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     bl_options = {'UNDO'}
     filename_ext = ".map"
     filter_glob: StringProperty(default="*.map", options={'HIDDEN'})
-    e_area = 4 # zero area epsilon
-    e_col = 5 # collinearity epsilon
 
     option_sel: BoolProperty(name="Selection only", default=True)
     option_tm: BoolProperty(name="Apply transform", default=True)
@@ -283,40 +281,37 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 bmesh.ops.transform(bm, matrix=obj.matrix_world,
                                                 verts=bm.verts)
 
-            bmesh.ops.connect_verts_concave(bm, faces=bm.faces)
-            # triangulate faces with mid-edge verts
+            bmesh.ops.connect_verts_concave(bm, faces=bm.faces) # concave poly
             if self.option_tj:
                 tjfaces = []
                 for face in bm.faces:
                     for loop in face.loops:
-                        if round(loop.calc_angle() - math.pi, self.e_col) == 0:
+                        if abs(loop.calc_angle() - math.pi) <= 1e-4:
                             tjfaces.append(face)
                             break
-                bmesh.ops.triangulate(bm, faces=tjfaces)
+                bmesh.ops.triangulate(bm, faces=tjfaces) # mid-edge verts
 
             for vert in bm.verts:
                 vert.co = self.gridsnap(vert.co)
             bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
-                                                angle_limit=0.0)
+                                            angle_limit=1e-3) # concave surface
             for face in bm.faces[:]:
-                for loop in face.loops:
-                    if round(loop.calc_angle(), self.e_area) == 0:
-                        break # skip zero-area faces
-                else: # outer loop
-                    fw('{\n')
-                    for vert in reversed(face.verts[0:3]):
+                if face.calc_area() <= 1e-4:
+                    continue
+                fw('{\n')
+                for vert in reversed(face.verts[0:3]):
+                    fw(f'( {self.printvec(vert.co)} ) ')
+                fw(self.texdata(face, bm, mobj))
+                pyr = bmesh.ops.poke(bm, faces=[face],
+                            offset=-self.option_depth)
+                apex = pyr['verts'][0].co
+                pyr['verts'][0].co = self.gridsnap(apex)
+                for pyrface in pyr['faces']:
+                    for vert in pyrface.verts[0:3]: # backfacing
                         fw(f'( {self.printvec(vert.co)} ) ')
-                    fw(self.texdata(face, bm, mobj))
-                    pyr = bmesh.ops.poke(bm, faces=[face],
-                                offset=-self.option_depth)
-                    apex = pyr['verts'][0].co
-                    pyr['verts'][0].co = self.gridsnap(apex)
-                    for pyrface in pyr['faces']:
-                        for vert in pyrface.verts[0:3]: # backfacing
-                            fw(f'( {self.printvec(vert.co)} ) ')
-                        pyrface.material_index = len(mobj.data.materials) - 1
-                        fw(self.texdata(pyrface, bm, mobj))
-                    fw('}\n')
+                    pyrface.material_index = len(mobj.data.materials) - 1
+                    fw(self.texdata(pyrface, bm, mobj))
+                fw('}\n')
 
             bpy.data.objects.remove(mobj)
             for obj in orig_sel:
