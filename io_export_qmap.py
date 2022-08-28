@@ -50,10 +50,13 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         description="Snap to grid (0 for off-grid)", min=0.0, max=256.0)
     option_depth: FloatProperty(name="Depth", default=2.0,
         description="Pyramid poke offset", min=0.0, max=256.0)
-    option_format: EnumProperty(name="Format", default='Valve',
+    option_uv: EnumProperty(name="UVs", default='Valve',
         items=( ('Quake', "Standard", "Axis-aligned texture projection"),
                 ('Valve', "Valve220", "Edge-bound texture projection"),
                 ('BPrim', "Primitives", "Plane-bound texture projection") ) )
+    option_flags: EnumProperty(name="Flags", default='None',
+        items=( ('None', "None", "No flags"),
+                ('Q2', "Quake 2", "Content, Surface, Value") ) )
     option_dest: EnumProperty(name="Save to", default='File',
         items=( ('File', "File", "Write data to a .map file"),
                 ('Clip', "Clipboard", "Store data in system buffer") ) )
@@ -69,8 +72,18 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         else:
             return vector
 
-    def printvec (self, vector):
+    def printvec(self, vector):
         return ' '.join([f'{co:.{self.option_fp}g}' for co in vector])
+
+    def faceflags(self, obj):
+        if self.option_flags == 'None':
+            return "\n"
+        elif self.option_flags == 'Q2':
+            col = obj.users_collection[0]
+            if ('detail' in obj.name) or ('detail' in col.name):
+                return f" {1<<27} 0 0\n"
+            else:
+                return " 0 0 0\n"
 
     def texdata(self, face, mesh, obj):
         mat = None
@@ -94,14 +107,13 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             uv_layer = mesh.loops.layers.uv.new("dummy")
         T = [loop[uv_layer].uv for loop in face.loops]
 
-        # UV handling ported from: https://bitbucket.org/khreathor/obj-2-map
-
-        if self.option_format == 'Valve':
+        if self.option_uv == 'Valve':
             # [ Ux Uy Uz Uoffs ] [ Vx Vy Vz Voffs ] rotation scaleU scaleV
-            dummy = ' [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1\n'
+            dummy = ' [ 1 0 0 0 ] [ 0 -1 0 0 ] 0 1 1'
 
-            height = -height # workaround for flipped v
+            height = -height # v is flipped
 
+            # ported from: https://bitbucket.org/khreathor/obj-2-map
             # Set up "2d world" coordinate system with the 01 edge along X
             world01 = V[1] - V[0]
             world02 = V[2] - V[0]
@@ -145,7 +157,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             [ qy ]   [ 0  0  bx by ] [ m22 ]
             '''
 
-            # Find an affine transformation to convert 
+            # Find an affine transformation to convert
             # world01_2d and world02_2d to their respective UV coords
             texCoordsVec = Vector((tex01.x, tex01.y, tex02.x, tex02.y))
             world2DMatrix = Matrix(((world01_2d.x, world01_2d.y, 0, 0),
@@ -187,11 +199,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
             texstring += f" [ {self.printvec(rt_full)} ]"\
                         f" [ {self.printvec(up_full)} ]"\
-                        f" 0 {self.printvec(scale)}\n"
+                        f" 0 {self.printvec(scale)}"
 
-        elif self.option_format == 'Quake':
+        elif self.option_uv == 'Quake':
             # offsetU offsetV rotation scaleU scaleV
-            dummy = ' 0 0 0 1 1\n'
+            dummy = ' 0 0 0 1 1'
 
             # 01 and 02 in 3D space
             world01 = V[1] - V[0]
@@ -213,7 +225,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             tex02.x *= width
             tex01.y *= height
             tex02.y *= height
-            
+
             # Find affine transformation between 2D and UV
             texCoordsVec = Vector((tex01.x, tex01.y, tex02.x, tex02.y))
             world2DMatrix = Matrix(((world01_2d.x, world01_2d.y, 0, 0),
@@ -239,12 +251,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             v0.rotate(Matrix.Rotation(math.radians(-rotation), 2))
             v0 = Vector((v0.x/scale.x, v0.y/scale.y))
             offset = t0 - v0
-            offset.y *= -1 # V is flipped
+            offset.y *= -1 # v is flipped
 
             finvals = [offset.x, offset.y, rotation, scale.x, scale.y]
-            texstring += f" {self.printvec(finvals)}\n"
+            texstring += f" {self.printvec(finvals)}"
 
-        elif self.option_format == 'BPrim':
+        elif self.option_uv == 'BPrim':
             # ( ( a1 a2 a3 ) ( a4 a5 a6 ) )
             dummy = '( ( 0.0078125 0 0 ) ( 0 0.0078125 0 ) ) '
             '''
@@ -310,12 +322,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 return dummy + texstring
             # unlike other formats, coordinates go before the material name
             texstring = f"( ( {self.printvec(A6[0:3])} )"\
-                        f"  ( {self.printvec(A6[3:6])} ) ) " + texstring + "\n"
+                        f"  ( {self.printvec(A6[3:6])} ) ) " + texstring
         return texstring
-  
+
     def execute(self, context):
         timer = time.time()
-        
+
         if self.option_sel:
             objects = context.selected_objects
         else:
@@ -325,11 +337,11 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         geo = []
         fw = geo.append
         fw('{\n"classname" "worldspawn"\n')
-        if self.option_format == 'Valve':
+        if self.option_uv == 'Valve':
             fw('"mapversion" "220"\n')
         bm = bmesh.new()
 
-        if self.option_format == 'BPrim':
+        if self.option_uv == 'BPrim':
             template = ['{\nbrushDef\n{\n', '}\n}\n']
         else:
             template = ['{\n', '}\n']
@@ -348,6 +360,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             bpy.ops.object.join()
             mobj = context.active_object
             mobj.data.materials.append(None) # empty slot for new faces
+            flags = self.faceflags(mobj) # everything's merged! fix me later
             bm.from_mesh(mobj.data)
 
             if self.option_tm:
@@ -374,7 +387,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(template[0])
                 for vert in reversed(face.verts[0:3]):
                     fw(f'( {self.printvec(vert.co)} ) ')
-                fw(self.texdata(face, bm, mobj))
+                fw(self.texdata(face, bm, mobj) + flags)
                 pyr = bmesh.ops.poke(bm, faces=[face],
                             offset=-self.option_depth)
                 apex = pyr['verts'][0].co
@@ -383,7 +396,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                     for vert in pyrface.verts[0:3]: # backfacing
                         fw(f'( {self.printvec(vert.co)} ) ')
                     pyrface.material_index = len(mobj.data.materials) - 1
-                    fw(self.texdata(pyrface, bm, mobj))
+                    fw(self.texdata(pyrface, bm, mobj) + flags)
                 fw(template[1])
 
             bpy.data.objects.remove(mobj)
@@ -395,6 +408,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
         elif self.option_geo == 'Brushes':
             for obj in objects:
+                flags = self.faceflags(obj)
                 bm.from_mesh(obj.data)
                 if self.option_tm:
                     bmesh.ops.transform(bm, matrix=obj.matrix_world,
@@ -415,7 +429,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 for face in bm.faces:
                     for vert in reversed(face.verts[0:3]):
                         fw(f'( {self.printvec(vert.co)} ) ')
-                    fw(self.texdata(face, bm, obj))
+                    fw(self.texdata(face, bm, obj) + flags)
                 fw(template[1])
                 bm.clear()
 
