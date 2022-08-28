@@ -45,13 +45,18 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_tm: BoolProperty(name="Apply transform", default=True)
     option_mod: BoolProperty(name="Apply modifiers", default=True)
     option_tj: BoolProperty(name="Triangulate 180°", default=True)
-    option_geo: EnumProperty(name="Geo", default='Faces',
-        items=( ('Brush', "Brush", "Export each object as a single brush"),
+    option_geo: EnumProperty(name="Mesh", default='Faces',
+        items=( ('Brush', "Brush", "Export each mesh as a single brush"),
                 ('Faces', "Faces", "Export each face as a pyramid brush"),
                 ('Prisms', "Walls", "Export each face as a prism brush"),
                 ('Soup', "Terrain", "Export faces as poly-soup extruded on Z"),
                 ('Blob', "Blob", "Export as pyramids with a common apex"),
                 ('Miter', "Shell", "Export faces as a solidified shell") ) )
+    option_nurbs: EnumProperty(name="NURBS", default='Mesh',
+        items=( ('None', "Ignore", "Ignore NURBS surfaces"),
+                ('Mesh', "Mesh", "Convert NURBS to meshes, export as brushes"),
+                ('Def2', "Dynamic", "Export NURBS as patchDef2 patches"),
+                ('Def3', "Fixed", "Export NURBS as patchDef3 patches") ) )
     option_scale: FloatProperty(name="Scale", default=1.0,
         description="Scale factor for all 3D coordinates")
     option_grid: FloatProperty(name="Grid", default=1.0,
@@ -384,14 +389,14 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         return texstring
 
 
-    def process_object(self, obj, fw, template):
+    def process_mesh(self, obj, fw, template):
         flags = self.faceflags(obj)
         origin = self.gridsnap(obj.matrix_world.translation)
-        if self.option_mod:
+        if self.option_mod or obj.type != 'MESH':
             obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
         obj.data.materials.append(None) # empty slot for new faces
         bm = bmesh.new()
-        bm.from_mesh(obj.data)
+        bm.from_mesh(obj.to_mesh())
         if self.option_tm:
             bmesh.ops.transform(bm, matrix=obj.matrix_world,
                                             verts=bm.verts)
@@ -475,11 +480,51 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         obj.data.materials.pop() # remove the empty slot
 
 
+    def process_patch(self, obj, spline, fw):
+        mat = None
+        if obj.material_slots:
+            mat = obj.material_slots[spline.material_index].material
+        if mat:
+            matname = mat.name.replace(" ","_")
+        else:
+            matname = self.option_skip
+        if self.option_brush == 'Doom3':
+            matname = f'"{matname}"'
+
+        wu, wv = spline.point_count_u, spline.point_count_v
+        nu, nv = wu + spline.use_cyclic_u, wv + spline.use_cyclic_v
+        ru, rv = spline.resolution_u + 1, spline.resolution_v + 1
+        du, dv = 1/(nu-1), -1/(nv-1) # UV increments (v is flipped)
+        if nu%2 == 0 or nv%2 == 0 or nu == 1 or nv == 1:
+            self.report({'WARNING'},f"Skipped invalid patch {obj.name}")
+            return
+
+        fw('{\npatch'+self.option_nurbs+'\n{\n')
+        fw(matname + '\n')
+        if self.option_nurbs == 'Def2':
+            fw(f"( {nu} {nv} 0 0 0 )\n(\n")
+        else:
+            fw(f"( {nu} {nv} {ru} {rv} 0 0 0 )\n(\n")
+        for i in range(nu):
+            fw("( ")
+            for j in reversed(range(nv)):
+                texuv = (i*du, j*dv)
+                index = (j%wv)*wu + (i%wu)
+                xyz = spline.points[index].co[:3]
+                if self.option_tm:
+                    xyz = obj.matrix_world @ Vector(xyz)
+                xyz = [self.gridsnap(co * self.option_scale) for co in xyz]
+                fw(f"( {self.printvec(xyz)} {self.printvec(texuv)} ) ")
+            fw(")\n")
+        fw(")\n}\n}\n")
+
+
     def execute(self, context):
         timer = time.time()
         geo = []
         fw = geo.append
         wspwn_objs, bmodel_objs = [],[]
+        patch_objs = []
 
         if self.option_brush == 'Doom3':
             fw('Version 2\n')
@@ -497,7 +542,13 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         else:
             objects = context.scene.objects
         for obj in objects:
-            if obj.type != 'MESH':
+            if obj.type == 'SURFACE':
+                if self.option_nurbs in ('Def2','Def3'):
+                    patch_objs.append(obj)
+                    continue
+            elif obj.type == 'META' and '.' in obj.name:
+                continue
+            elif obj.type not in ('MESH','SURFACE','CURVE','FONT','META'):
                 continue
             if ((self.option_group == 'None')
                 or (self.option_group == 'Auto' and self.option_geo == 'Brush'
@@ -509,7 +560,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 bmodel_objs.append(obj)
 
         for obj in wspwn_objs:
-            self.process_object(obj, fw, template)
+            self.process_mesh(obj, fw, template)
+        for obj in patch_objs:
+            for spline in obj.data.splines:
+                self.process_patch(obj, spline, fw)
         collections = [bpy.context.scene.collection] + bpy.data.collections[:]
         for col in collections:
             if col.objects:
@@ -519,7 +573,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                     if obj in bmodel_objs:
                         if self.option_geo != 'Brush':
                             fw(self.entname(obj))
-                        self.process_object(obj, fw, template)
+                        self.process_mesh(obj, fw, template)
         fw('}\n')
 
         if self.option_dest == 'File':
@@ -531,6 +585,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         timer = time.time() - timer
         self.report({'INFO'},f"Finished exporting map, took {timer:g} sec")
         return {'FINISHED'}
+
 
 def menu_func_export(self, context):
     self.layout.operator(ExportQuakeMap.bl_idname, text="Quake Map (.map)")
