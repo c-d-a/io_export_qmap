@@ -14,13 +14,13 @@ The addon offers UVs in "Standard Quake", "Valve220" and "Brush Primitives" form
 ## Installation
 Download [io_export_qmap.py](https://github.com/c-d-a/io_export_qmap/raw/master/io_export_qmap.py), then select it under "Edit > Preferences > Add-ons > Install".  
 Older Blender versions may show an error about missing preferences on first setup - try enabling the addon again.  
-The addon preferences allow you to change the default settings used in the export dialogue. They only take effect after restarting Blender.
+The addon preferences allow you to change the default settings used in the export dialogue. They only take effect after restarting Blender.  
 ![pref](https://user-images.githubusercontent.com/55441216/187100568-f4f689ff-39c8-4cf4-b166-146cfc9a1b79.png)
 
 
 ## Mesh Options
 The map format requires each brush to be convex.  
-There are many ways to represent a mesh with brushes, each with their pros and cons.
+There are many ways to represent a mesh with brushes, each with their pros and cons.  
 ![001-015](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif)
 
 
