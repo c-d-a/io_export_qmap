@@ -617,9 +617,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     def process_mesh(self, obj, fw, template):
         flags = self.faceflags(obj)
         origin = self.gridsnap(obj.matrix_world.translation)
+        obj.data.materials.append(None) # empty slot for new faces
+        orig_obj = obj
         if self.option_mod or obj.type != 'MESH':
             obj = obj.evaluated_get(bpy.context.evaluated_depsgraph_get())
-        obj.data.materials.append(None) # empty slot for new faces
         bm = bmesh.new()
         bm.from_mesh(obj.to_mesh())
         if self.option_tm:
@@ -702,7 +703,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(template[1])
 
         bm.free()
-        obj.data.materials.pop() # remove the empty slot
+        orig_obj.data.materials.pop() # remove the empty slot
 
 
     def process_patch(self, obj, spline, fw):
