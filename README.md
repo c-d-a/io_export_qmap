@@ -21,7 +21,8 @@ The addon preferences allow you to change the default settings used in the expor
 ## Mesh Options
 The map format requires each brush to be convex.  
 There are many ways to represent a mesh with brushes, each with their pros and cons.  
-![001-015](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif)
+(if you can't see the animation below, try a different web browser)  
+![mesh](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif)
 
 
 ## Formats
