@@ -92,12 +92,16 @@ ptxt = {
         "items":(
             ('None', "Ignore", "Ignore light objects"),
             ('Auto', "Adaptive", "Export lights, approximate intensity"\
-                "\n\nScales light intensity with the scale of the scene"\
-                ", hopefully WYSIWYG.\nSpotlights automatically get a target"\
-                ", but their cone angle has to be set manually later"),
-            ('AsIs', "Explicit", "Export lights, use strength as is"\
-                "\n\nSpotlights automatically get a target"\
-                ", but their cone angle has to be set manually later") )},
+                "\n\nAttempts to match the lights' appearance"\
+                " by scaling their brightness with the scene scale."\
+                "\nNote that for exporting in 1:1 scale, light intensity"\
+                " will likely need to be in the thousands."\
+                "\n\nSpotlights automatically get a target."\
+                "\nidTech4-format lights can be exported by choosing"\
+                " 'Doom 3' as the brush plane format"),
+            ('AsIs', "Explicit", "Export lights, use intensity as is"\
+                "\n\nSame as 'Adaptive', except intensity will be used as is."\
+                "\nMostly useful with imported maps and pre-set lights") )},
     'empties': {"name":"Empty", "def":'Point',
         "items":(
             ('None', "Ignore", "Ignore empty objects"),
@@ -135,8 +139,9 @@ ptxt = {
                 "\n(Quake, Half-Life, Quake 4)"),
             ('Q2', "Quake 2", "Content, Surface, Value"\
                 "\n(Quake 2, Quake 3, Doom 3)"\
-                "\n\nIf an object or its collection has 'detail' in the name,"\
-                "\nevery face of that object will get marked as Detail" ) )},
+                "\n\nSets the Detail flag for faces that belong to:"\
+                "\n - a face map,\n - an object,\n - or a collection"\
+                "\nwith 'detail' in their name") )},
     'dest': {"name":"Output", "def":'File',
         "items":(
             ('File', "File", "Save to a .map file"),
@@ -756,23 +761,55 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     def process_light(self, obj, fw):
         intensity = obj.data.energy
-        radius = obj.data.shadow_soft_size
         origin = obj.matrix_world.to_translation() * self.option_scale
         fw('{\n"classname" "light"\n')
         fw(f'"origin" "{self.printvec(origin)}"\n')
+        fw(f'"_color" "{self.printvec(obj.data.color)}"\n')
         if self.option_lights == 'Auto':
             intensity *= self.option_scale**2 / 40**2 # 1 inch = 1 unit
-            fw(f'"delay" "2"\n') # Q1: inverse-square attenuation
-            if radius != 0.25 : # skip unless modified by user
-                fw(f'"_deviance" "{(radius * self.option_scale):g}"\n')
-        fw(f'"light" "{intensity:g}"\n')
-        fw(f'"_color" "{self.printvec(obj.data.color)}"\n')
+        fw(f'"light" "{intensity}"\n')
+
         keys = obj.keys()
-        for prop in keys:
-            if isinstance(obj[prop], (int, float, str)): # no arrays
-                fw(f'"{prop}" "{obj[prop]}"\n')
-        if obj.data.type == 'SPOT':
-            if ('target' not in keys) and ('mangle' not in keys):
+        if 'delay' not in keys:
+            fw(f'"delay" "2"\n') # Q1 attenuation
+        pt_size = obj.data.shadow_soft_size
+        if '_deviance' not in keys and pt_size != 0.25 :
+            fw(f'"_deviance" "{pt_size * self.option_scale}"\n') # Q1,Q3
+        for prop in keys: # custom object properties
+            if prop not in ('classname','origin','light','_color',
+                            'angle','_softangle','radius','target'):
+                if isinstance(obj[prop], (int, float, str)): # no arrays
+                    fw(f'"{prop}" "{obj[prop]}"\n')
+
+        if obj.data.type == 'POINT':
+            if self.option_brush == 'Doom3':
+                pt_range = intensity * 10 # eyeballed
+                if 'light_radius' not in keys:
+                    fw(f'"light_radius" "{pt_range} {pt_range} {pt_range}"\n')
+                if 'texture' not in keys:
+                    fw(f'"texture" "lights/falloff_exp1"\n')
+        elif obj.data.type == 'SPOT':
+            spot_ang = obj.data.spot_size
+            if self.option_brush == 'Doom3':
+                spot_hyp = 10 * self.option_scale
+                spot_scale = obj.matrix_world.to_scale()
+                spot_fw = math.cos(spot_ang/2) * spot_hyp * spot_scale.z
+                spot_rt = math.sin(spot_ang/2) * spot_hyp * spot_scale.x
+                spot_up = math.sin(spot_ang/2) * spot_hyp * spot_scale.y
+                fw(f'"light_target" "0 0 -{spot_fw}"\n')
+                fw(f'"light_right" "{spot_rt} 0 0"\n')
+                fw(f'"light_up" "0 {spot_up} 0"\n')
+                if 'texture' not in keys:
+                    fw(f'"texture" "lights/spot01"\n')
+                spot_rot = obj.matrix_world.to_euler().to_matrix()
+                d3_rot = [el for row in spot_rot.inverted_safe() for el in row]
+                fw(f'"rotation" "{self.printvec(d3_rot)}"\n')
+            elif self.option_brush == 'Quake':
+                spot_deg = math.degrees(spot_ang)
+                spot_inner = spot_deg * (1 - obj.data.spot_blend)
+                fw(f'"angle" "{spot_deg}"\n') # Q1
+                fw(f'"_softangle" "{spot_inner}"\n') # Q1
+                fw(f'"radius" "{math.tan(spot_ang/2) * 64}"\n') # Q3
                 self.seen_names.append(self.spot_name)
                 spot_num = self.seen_names.count(self.spot_name)
                 spot_rot = obj.matrix_world.to_euler().to_matrix()
@@ -799,7 +836,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 ang = (obj.matrix_world @ self.cam_correct).to_euler()
             deg = (math.degrees(a) for a in (-ang.y, ang.z, ang.x))
             fw(f'"angles" "{self.printvec(deg)}"\n')
-        for prop in keys:
+        for prop in keys: # custom object properties
             if isinstance(obj[prop], (int, float, str)): # no arrays
                 fw(f'"{prop}" "{obj[prop]}"\n')
         fw('}\n')
