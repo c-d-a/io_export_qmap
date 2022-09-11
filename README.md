@@ -2,7 +2,7 @@
 
 This addon allows exporting Blender scenes to Quake .map file format.
 
-Supported Blender versions: 2.83 - 3.2.2+  
+Supported Blender versions: 2.83 - 3.3+  
 Supported game formats: Quake, Half-Life, Quake 2, Quake 3, Doom 3, Quake 4  
 Other Quake-derived games (Jedi Academy, Call of Duty, etc) are untested, but hopefully also compatible.
 
@@ -39,7 +39,7 @@ Texture coordinates in the legacy "Standard Quake" format have the broadest supp
 
 ### Flags
 Quake 2 introduced flags for defining various special properties (lights, etc). The flags carried over to Quake 3, still remained in vestigial form in Doom 3, and were removed in the Quake 4 format.  
-The exporter currently only supports the Detail flag. For any face belonging to an object or to a collection with "detail" anywhere in their name, the exported surface will get its Detail flag set.
+The exporter currently only supports the Detail flag. For any face belonging to an object, a collection, or a face map with "detail" anywhere in their name, the exported surface will get its Detail flag set.
 
 ### Clipboard
 For convenience, the exporter can put the map data into the system clipboard, instead of writing it to a .map file. In this case, the filename in the export dialogue is ignored, and the data is ready to be pasted directly into an open map in your editor of choice. Some functionality may depend on the editor automatically re-assigning the entity names and targets.

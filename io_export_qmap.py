@@ -18,12 +18,12 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2022, 8, 28),
-    "blender": (3, 2, 2),
+    "version": (2022, 9, 11),
+    "blender": (3, 3, 0),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
     "category": "Import-Export",
-    "tracker_url": "https://github.com/c-d-a/io_export_qmap"
+    "doc_url": "https://github.com/c-d-a/io_export_qmap"
 }
 
 import bpy, bmesh, math, time
@@ -360,12 +360,20 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             return f'( {self.printvec([co for co in face.normal] + [dist])} ) '
 
 
-    def faceflags(self, obj):
+    def faceflags(self, face, mesh, obj):
         if self.option_flags == 'None':
             return "\n"
         elif self.option_flags == 'Q2':
             col = obj.users_collection[0]
-            if ('detail' in obj.name) or ('detail' in col.name):
+            if len(obj.face_maps) > 0:
+                obj.face_maps.new() # faces w/o face maps have index -1 (?)
+                fm_layer = mesh.faces.layers.face_map.verify()
+                fm_name = obj.face_maps[face[fm_layer]].name
+                obj.face_maps.remove(obj.face_maps[-1])
+            else:
+                fm_name = ''
+            names = obj.name + col.name + fm_name
+            if 'detail' in names.lower():
                 return f" {1<<27} 0 0\n"
             else:
                 return " 0 0 0\n"
@@ -615,7 +623,6 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
 
     def process_mesh(self, obj, fw, template):
-        flags = self.faceflags(obj)
         origin = self.gridsnap(obj.matrix_world.translation)
         obj.data.materials.append(None) # empty slot for new faces
         orig_obj = obj
@@ -640,6 +647,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                                                 angle_limit=0.0)
             fw(template[0])
             for face in bm.faces:
+                flags = self.faceflags(face, bm, orig_obj)
                 fw(self.brushplane(face))
                 fw(self.texdata(face, bm, obj) + flags)
             fw(template[1])
@@ -663,6 +671,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             for face in bm.faces[:]:
                 if face.calc_area() <= 1e-4:
                     continue
+                flags = self.faceflags(face, bm, orig_obj)
                 fw(template[0])
                 fw(self.brushplane(face))
                 fw(self.texdata(face, bm, obj) + flags) # write original face
