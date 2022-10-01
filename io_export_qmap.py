@@ -18,7 +18,7 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2022, 9, 11),
+    "version": (2022, 10, 1),
     "blender": (3, 3, 0),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
@@ -753,7 +753,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 xyz = spline.points[index].co[:3]
                 if self.option_tm:
                     xyz = obj.matrix_world @ Vector(xyz)
-                xyz = [self.gridsnap(co * self.option_scale) for co in xyz]
+                xyz = self.gridsnap(xyz * self.option_scale)
                 fw(f"( {self.printvec(xyz)} {self.printvec(texuv)} ) ")
             fw(")\n")
         fw(")\n}\n}\n")
