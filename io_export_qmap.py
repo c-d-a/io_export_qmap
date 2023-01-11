@@ -18,8 +18,8 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2022, 10, 1),
-    "blender": (3, 3, 0),
+    "version": (2023, 1, 11),
+    "blender": (3, 4, 1),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
     "category": "Import-Export",
@@ -642,8 +642,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             vert.co = self.gridsnap(vert.co * self.option_scale)
 
         if self.option_geo == 'Brush':
-            hull = bmesh.ops.convex_hull(bm, input=bm.verts)
-            interior = [face for face in bm.faces if face not in hull['geom']]
+            hull = bmesh.ops.convex_hull(bm, input=bm.verts,
+                                        use_existing_faces=True)
+            geom_hull = hull['geom'] + hull['geom_holes']
+            interior = [face for face in bm.faces if face not in geom_hull]
             bmesh.ops.delete(bm, geom=interior, context='FACES')
             bmesh.ops.recalc_face_normals(bm, faces=bm.faces)
             bmesh.ops.join_triangles(bm, faces=bm.faces,
