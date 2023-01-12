@@ -1,8 +1,8 @@
 # Blender MAP Exporter
 
-This addon allows exporting Blender scenes to Quake .map file format.
+This addon allows exporting Blender scenes to idTech .map file format.
 
-Supported Blender versions: 2.83 - 3.3+  
+Supported Blender versions: 2.83 - 3.4+  
 Supported game formats: Quake, Half-Life, Quake 2, Quake 3, Doom 3, Quake 4  
 Other Quake-derived games (Jedi Academy, Call of Duty, etc) are untested, but hopefully also compatible.
 
@@ -15,7 +15,7 @@ The addon offers UVs in "Standard Quake", "Valve220" and "Brush Primitives" form
 Download [io_export_qmap.py](https://github.com/c-d-a/io_export_qmap/raw/master/io_export_qmap.py), then select it under "Edit > Preferences > Add-ons > Install".  
 Older Blender versions may show an error about missing preferences on first setup - try enabling the addon again.  
 The addon preferences allow you to change the default settings used in the export dialogue. They only take effect after restarting Blender.  
-![pref](https://user-images.githubusercontent.com/55441216/187100568-f4f689ff-39c8-4cf4-b166-146cfc9a1b79.png)
+![prefs](https://user-images.githubusercontent.com/55441216/211974555-07463f1c-f5a6-4b94-90e4-abfb86a8aba9.png)
 
 
 ## Mesh Options
@@ -23,6 +23,10 @@ The map format requires each brush to be convex.
 There are many ways to represent a mesh with brushes, each with their pros and cons.  
 (if you can't see the animation below, try a different web browser)  
 ![mesh](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif)
+
+Mesh export mode can be selected on export, but for complex scenes you can also override it on a per-object basis:  
+![override](https://user-images.githubusercontent.com/55441216/211972711-d9cb4629-8ee1-41fa-8a00-831bee7d14ff.png)
+
 
 
 ## Formats
@@ -33,9 +37,11 @@ Brushes are defined by planes, rather than by individual vertices. This is an im
 Most games use the original Quake format, defining planes by three verts. Doom 3 introduced a new format, using a plane equation.
 
 ### UVs
-Since the .map format doesn't store individual vertices, it doesn't store individual verts' UVs either. Instead, it defines texture coordinates per plane. The exporter uses two arbitrarily selected edges for this task. In practice, this means that it is impossible to maintain perspective warp, unless you triangulate every face in advance.
+UV scale depends on texture size. The exporter will use the first texture it finds in the material's node tree, or, failing that, the user-definable fallback size.
 
-Texture coordinates in the legacy "Standard Quake" format have the broadest support, but also potentially lose a lot of information, as shearing is unsupported (only rotation and scale along world axes). The two other formats, "Valve220" and "Brush Primitives", are more advanced and have similar capabilities to each other. So the choice only depends on whether your editor and compiler support them.
+Texture coordinates in the legacy "Standard Quake" format have the broadest support, but also potentially lose a lot of information, as it doesn't support shearing (only rotation and scale along world axes). The two other formats, "Valve220" and "Brush Primitives", are more advanced and have similar capabilities to each other. The choice depends on whether your editor and compiler support them.
+
+Since the .map format doesn't store individual vertices, it doesn't store individual verts' UVs either. Instead, it defines texture coordinates per plane. The exporter uses two arbitrarily selected edges for this task. In practice, this means that it is impossible to maintain perspective warp (e.g. on curved pipes), unless you triangulate every face in advance.
 
 ### Flags
 Quake 2 introduced flags for defining various special properties (lights, etc). The flags carried over to Quake 3, still remained in vestigial form in Doom 3, and were removed in the Quake 4 format.  
