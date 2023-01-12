@@ -736,6 +736,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                                                     geom=new['faces'])
                     new['faces'].extend(geom['geom'])
 
+                bm.normal_update()
                 for newface in new['faces']: # write new faces
                     newface.normal_flip()
                     newface.material_index = len(obj.data.materials) - 1
