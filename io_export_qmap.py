@@ -18,7 +18,7 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2023, 1, 11),
+    "version": (2023, 1, 12),
     "blender": (3, 4, 1),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
@@ -673,7 +673,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                                             angle_limit=1e-3) # concave surface
             if self.option_geo == 'Soup':
                 bottom = min(vert.co.z for vert in bm.verts)
-                bottom = self.gridsnap(bottom - self.option_depth)
+                bottom -= self.option_depth
 
             for face in bm.faces[:]:
                 if face.calc_area() <= 1e-4:
