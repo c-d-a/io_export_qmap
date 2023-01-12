@@ -169,6 +169,19 @@ ptxt = {
         "desc":"Generic size for UV scaling on materials without texture maps"}
 }
 
+
+class ExportQuakeMapObjectPanel(bpy.types.Panel):
+    bl_idname = "OBJECT_PT_QMAP_Props"
+    bl_label = "idTech Map Export"
+    bl_space_type = 'PROPERTIES'
+    bl_region_type = 'WINDOW'
+    bl_context = "object"
+    bl_options = {'DEFAULT_CLOSED'}
+
+    def draw(self, context):
+        self.layout.prop(context.active_object, "qmap_geo_type")
+
+
 class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
     bl_idname = __name__
 
@@ -637,6 +650,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
 
     def process_mesh(self, obj, fw, template):
+        geo_type = obj.qmap_geo_type
+        if geo_type == 'Default':
+            geo_type = self.option_geo
         origin = self.gridsnap(obj.matrix_world.translation)
         obj.data.materials.append(None) # empty slot for new faces
         orig_obj = obj
@@ -650,7 +666,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         for vert in bm.verts:
             vert.co = self.gridsnap(vert.co * self.option_scale)
 
-        if self.option_geo == 'Brush':
+        if geo_type == 'Brush':
             hull = bmesh.ops.convex_hull(bm, input=bm.verts,
                                         use_existing_faces=True)
             geom_hull = hull['geom'] + hull['geom_holes']
@@ -680,7 +696,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 bmesh.ops.triangulate(bm, faces=tjfaces) # mid-edge verts
             bmesh.ops.connect_verts_nonplanar(bm, faces=bm.faces,
                                             angle_limit=1e-3) # concave surface
-            if self.option_geo == 'Soup':
+            if geo_type == 'Soup':
                 bottom = min(vert.co.z for vert in bm.verts)
                 bottom -= self.option_depth
 
@@ -692,26 +708,26 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(self.brushplane(face))
                 fw(self.texdata(face, bm, obj) + flags) # write original face
 
-                if self.option_geo in ('Faces', 'Blob'):
+                if geo_type in ('Faces', 'Blob'):
                     new = bmesh.ops.poke(bm, faces=[face],
                                 offset=-self.option_depth)
-                    if self.option_geo == 'Blob':
+                    if geo_type == 'Blob':
                         new['verts'][0].co = origin
-                    elif self.option_geo == 'Faces':
+                    elif geo_type == 'Faces':
                         new['verts'][0].co = self.gridsnap(new['verts'][0].co)
 
-                elif self.option_geo in ('Prisms', 'Soup', 'Miter'):
+                elif geo_type in ('Prisms', 'Soup', 'Miter'):
                     clone = face.copy() # keep original face & vertex normals
                     new = bmesh.ops.extrude_discrete_faces(bm, faces=[clone])
                     new_verts = new['faces'][0].verts
 
-                    if self.option_geo == 'Prisms':
+                    if geo_type == 'Prisms':
                         bmesh.ops.translate(bm, verts=new_verts,
                             vec=face.normal * -self.option_depth)
-                    elif self.option_geo == 'Soup':
+                    elif geo_type == 'Soup':
                         for vert in new_verts:
                             vert.co.z = bottom
-                    elif self.option_geo == 'Miter':
+                    elif geo_type == 'Miter':
                         for new_v, orig_v in zip(new_verts, face.verts):
                             new_v.co -= (orig_v.normal *
                                 orig_v.calc_shell_factor() * self.option_depth)
@@ -892,10 +908,14 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 continue
             elif obj.type not in ('MESH','SURFACE','CURVE','FONT','META'):
                 continue
+
+            geo_type = obj.qmap_geo_type
+            if geo_type == 'Default':
+                geo_type = self.option_geo
             if ((self.option_group == 'None')
-                or (self.option_group == 'Auto' and self.option_geo == 'Brush'
+                or (self.option_group == 'Auto' and geo_type == 'Brush'
                     and obj.users_collection[0].name.startswith('worldspawn'))
-                or (self.option_group == 'Auto' and self.option_geo != 'Brush'
+                or (self.option_group == 'Auto' and geo_type != 'Brush'
                     and obj.name.startswith('worldspawn'))):
                         wspwn_objs.append(obj)
             else:
@@ -909,14 +929,23 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 self.process_patch(obj, spline, fw)
         collections = [bpy.context.scene.collection] + bpy.data.collections[:]
         for col in collections:
-            if col.objects:
-                if self.option_geo == 'Brush':
-                    fw(self.entname(col))
-                for obj in col.objects:
-                    if obj in bmodel_objs:
-                        if self.option_geo != 'Brush':
-                            fw(self.entname(obj))
-                        self.process_mesh(obj, fw, template)
+            bmodel_brush_objs, bmodel_face_objs = [],[]
+            for obj in [ob for ob in col.objects if ob in bmodel_objs]:
+                geo_type = obj.qmap_geo_type
+                if geo_type == 'Default':
+                    geo_type = self.option_geo
+                if geo_type == 'Brush':
+                    bmodel_brush_objs.append(obj)
+                else:
+                    bmodel_face_objs.append(obj)
+            print(f"{col.name}:\nbrush: {bmodel_brush_objs}\nface: {bmodel_face_objs}\n")
+            if bmodel_brush_objs:
+                fw(self.entname(col))
+                for obj in bmodel_brush_objs:
+                    self.process_mesh(obj, fw, template)
+            for obj in bmodel_face_objs:
+                fw(self.entname(obj))
+                self.process_mesh(obj, fw, template)
         fw('}\n')
         for obj in light_objs:
             self.process_light(obj, fw)
@@ -960,9 +989,15 @@ def menu_func_export(self, context):
 
 def register():
     bpy.utils.register_class(ExportQuakeMap)
+    bpy.types.Object.qmap_geo_type = bpy.props.EnumProperty(name="Geo",
+        items=(('Default', "Default", "No override"),) + ptxt['geo']['items'],
+        description="Mesh export mode override")
+    bpy.utils.register_class(ExportQuakeMapObjectPanel)
     bpy.types.TOPBAR_MT_file_export.append(menu_func_export)
 
 def unregister():
     bpy.utils.unregister_class(ExportQuakeMap)
     bpy.utils.unregister_class(ExportQuakeMapPreferences)
+    del bpy.types.Object.qmap_geo_type
+    bpy.utils.unregister_class(ExportQuakeMapObjectPanel)
     bpy.types.TOPBAR_MT_file_export.remove(menu_func_export)
