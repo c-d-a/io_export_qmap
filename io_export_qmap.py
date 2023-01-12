@@ -938,7 +938,6 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                     bmodel_brush_objs.append(obj)
                 else:
                     bmodel_face_objs.append(obj)
-            print(f"{col.name}:\nbrush: {bmodel_brush_objs}\nface: {bmodel_face_objs}\n")
             if bmodel_brush_objs:
                 fw(self.entname(col))
                 for obj in bmodel_brush_objs:
