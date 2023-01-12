@@ -159,10 +159,14 @@ ptxt = {
             ('Gen', "Generic", "Group under generic classnames (set below)"))},
     'gname': {"name":"Generic classname", "def":'func_group',
         "desc":"Class name for brush entities, unless set otherwise"\
-            "\n\n  e.g.:\nfunc_group\nfunc_detail\n"},
+            "\n\ne.g.:\nfunc_group\nfunc_detail"},
     'skip': {"name":"Generic material", "def":'skip',
         "desc":"Material to use on new and unassigned faces"\
-            "\n\n  e.g.:\nskip\ntextures/common/caulk\n"}
+            "\n\ne.g.:\nskip\ntextures/common/caulk"},
+    'size': {"name":"Generic size", "def":'64',
+        "items":(('16','16',''),('32','32',''),('64','64',''),('128','128',''),
+                ('256','256',''),('512','512',''),('1024','1024','')),
+        "desc":"Generic size for UV scaling on materials without texture maps"}
 }
 
 class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
@@ -206,6 +210,8 @@ class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
         default=ptxt['gname']['def'], description=ptxt['gname']['desc'])
     skip: StringProperty(name=ptxt['skip']['name'],
         default=ptxt['skip']['def'], description=ptxt['skip']['desc'])
+    size: EnumProperty(name=ptxt['size']['name'], items=ptxt['size']['items'],
+        default=ptxt['size']['def'], description=ptxt['size']['desc'])
 
     def draw(self, context):
         self.layout.label(text="Default export settings", icon='PREFERENCES')
@@ -221,7 +227,7 @@ class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
         col = spl.column()
         for p in ["sel", "tm", "mod", "tj"]: col.prop(self, p)
         col = self.layout.column()
-        for p in ["group", "gname", "skip"]: col.prop(self, p)
+        for p in ["group", "gname", "skip", "size"]: col.prop(self, p)
 
 bpy.utils.register_class(ExportQuakeMapPreferences)
 
@@ -273,6 +279,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         default=prefs.gname, description=ptxt['gname']['desc'])
     option_skip: StringProperty(name=ptxt['skip']['name'],
         default=prefs.skip, description=ptxt['skip']['desc'])
+    option_size: EnumProperty(name=ptxt['size']['name'], default=prefs.size,
+        items=ptxt['size']['items'], description=ptxt['size']['desc'])
 
     # all encountered names, including duplicates
     seen_names = []
@@ -312,11 +320,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         col = spl.column()
         for p in [o+"flags",o+"dest"]: col.prop(self, p)
         self.layout.separator()
-        self.layout.label(text="Naming", icon='GROUP')
+        self.layout.label(text="Miscellaneous", icon='GROUP')
         col = self.layout.column()
         col.prop(self, o+"group")
         col.prop(self, o+"gname", text="Class")
         col.prop(self, o+"skip", text="Material")
+        col.prop(self, o+"size", text="Tex size")
 
 
     def entname(self, ent):
@@ -386,7 +395,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
     def texdata(self, face, mesh, obj):
         mat = None
-        width = height = 64
+        width = height = int(self.option_size)
         if obj.material_slots:
             mat = obj.material_slots[face.material_index].material
         if mat:
