@@ -21,10 +21,10 @@ The addon preferences allow you to change the default settings used in the expor
 ## Mesh Options
 The map format requires each brush to be convex.  
 There are many ways to represent a mesh with brushes, each with their pros and cons.  
-(if you can't see the animation below, try a different web browser)  
+(if you can't see the animation below, [open](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif) it in another tab or try a different web browser)  
 ![mesh](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif)
 
-Mesh export mode can be selected on export, but for complex scenes you can also override it on a per-object basis:  
+For complex scenes, you can override mesh export mode on a per-object basis:  
 ![override](https://user-images.githubusercontent.com/55441216/211972711-d9cb4629-8ee1-41fa-8a00-831bee7d14ff.png)
 
 
@@ -34,7 +34,8 @@ In most cases .map file is an intermediary between the editor and the compiler. 
 
 ### Planes
 Brushes are defined by planes, rather than by individual vertices. This is an important distinction to keep in mind, because when exporting detailed geometry, you will need enough precision to represent each plane. Otherwise, any face with more than three verts may end up leaving gaps. Soft maximum of 17 decimal places roughly matches TrenchBroom's precision.  
-Most games use the original Quake format, defining planes by three verts. Doom 3 introduced a new format, using a plane equation.
+
+Most games use the original Quake format, defining planes by three verts. Doom 3 introduced a new format, using a plane equation. While the original format meant that verts of neighboring triangles never drift apart, with Doom 3 planes you get no such guarantee, so you might want to use higher precision even on simple meshes.
 
 ### UVs
 UV scale depends on texture size. The exporter will use the first texture it finds in the material's node tree, or, failing that, the user-definable fallback size.
