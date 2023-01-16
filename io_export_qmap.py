@@ -18,7 +18,7 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2023, 1, 12),
+    "version": (2023, 1, 15),
     "blender": (3, 4, 1),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
@@ -874,6 +874,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         timer = time.time()
         map_text = []
         fw = map_text.append
+        self.seen_names = []
         wspwn_objs, bmodel_objs = [],[]
         patch_objs, light_objs, empty_objs = [],[],[]
 
