@@ -615,7 +615,10 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             '''
             n = face.normal
             # angle between the X axis and normal's projection onto XY plane
-            theta_z = math.atan2(n.y, n.x) if (1-abs(n.z) > 1e-7) else 0
+            if (abs(n.x) > 1e-6 or abs(n.y) > 1e-6):
+                theta_z = math.atan2(n.y, n.x)
+            else:
+                theta_z = 0
             # angle between the normal and its projection onto XY plane
             theta_y = math.atan2(n.z, math.sqrt(n.x**2 + n.y**2))
 
