@@ -643,6 +643,9 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 A6 = solve(M6, T6)
             except:
                 return dummy + texstring
+            if ((abs(A6[0]) < 1e-9 and abs(A6[1]) < 1e-9) or
+                (abs(A6[3]) < 1e-9 and abs(A6[4]) < 1e-9)):
+                return dummy + texstring
             # unlike other formats, coordinates go before the material name
             texstring = f"( ( {self.printvec(A6[0:3])} )"\
                         f"  ( {self.printvec(A6[3:6])} ) ) " + texstring
