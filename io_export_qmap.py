@@ -57,6 +57,9 @@ ptxt = {
         "desc":"Apply modifiers before export, using their viewport settings"},
     'tj': {"name":"Triangulate 180°", "def":True,
         "desc":"Split faces with mid-edge vertices (for better UVs)"},
+    'dr':  {"name":"DarkRadiant layers", "def":True,
+        "desc":"Export View Layer visibility to .darkradiant file"\
+            "\n\nUses combined viewport visibility of objects & collections"},
 
     'geo': {"name":"Mesh", "def":'Faces',
         "items":(
@@ -193,6 +196,8 @@ class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
         default=ptxt['mod']['def'], description=ptxt['mod']['desc'])
     tj: BoolProperty(name=ptxt['tj']['name'],
         default=ptxt['tj']['def'], description=ptxt['tj']['desc'])
+    dr: BoolProperty(name=ptxt['dr']['name'],
+        default=ptxt['dr']['def'], description=ptxt['dr']['desc'])
     geo: EnumProperty(name=ptxt['geo']['name'],
         default=ptxt['geo']['def'], items=ptxt['geo']['items'])
     nurbs: EnumProperty(name=ptxt['nurbs']['name'],
@@ -241,6 +246,9 @@ class ExportQuakeMapPreferences(bpy.types.AddonPreferences):
         for p in ["sel", "tm", "mod", "tj"]: col.prop(self, p)
         col = self.layout.column()
         for p in ["group", "gname", "skip", "size"]: col.prop(self, p)
+        spl = self.layout.row().split(factor=0.24)
+        spl.column().label(text="DarkRadiant layers:")
+        spl.column().prop(self, "dr", text="")
 
 bpy.utils.register_class(ExportQuakeMapPreferences)
 
@@ -262,6 +270,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         default=prefs.mod, description=ptxt['mod']['desc'])
     option_tj: BoolProperty(name=ptxt['tj']['name'],
         default=prefs.tj, description=ptxt['tj']['desc'])
+    option_drlayers: BoolProperty(name=ptxt['dr']['name'],
+        default=prefs.dr, description=ptxt['dr']['desc'])
     option_geo: EnumProperty(name=ptxt['geo']['name'],
         default=prefs.geo, items=ptxt['geo']['items'])
     option_nurbs: EnumProperty(name=ptxt['nurbs']['name'],
@@ -295,6 +305,8 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
     option_size: EnumProperty(name=ptxt['size']['name'], default=prefs.size,
         items=ptxt['size']['items'], description=ptxt['size']['desc'])
 
+    dr_string = ""
+    dr_layers = {}
     # all encountered names, including duplicates
     seen_names = []
     # offset spotlight targets by 64 units, regardless of chosen scale
@@ -311,7 +323,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         for p in [o+"sel",o+"tm"]: col.prop(self, p)
         col = spl.column()
         for p in [o+"mod",o+"tj"]: col.prop(self, p)
-        self.layout.separator()
+        self.layout.row().prop(self, o+"drlayers")
         self.layout.label(text="Object types", icon='SCENE_DATA')
         spl = self.layout.row().split(factor=0.5)
         col = spl.column()
@@ -339,6 +351,35 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         col.prop(self, o+"gname", text="Class")
         col.prop(self, o+"skip", text="Material")
         col.prop(self, o+"size", text="Tex size")
+
+
+    def layername(self, name):
+        # Blender: case-sensitive, allows spaces in names
+        # DarkRadiant: case-sensitive, strips spaces, reserves 'Default'
+        return name.replace(' ','_')
+
+
+    def objlayer(self, obj):
+        if not self.option_drlayers:
+            return
+        layers = []
+        for vlayer in bpy.context.scene.view_layers:
+            lname = self.layername(vlayer.name)
+            if isinstance(obj, bpy.types.Object):
+                if obj.visible_get(view_layer=vlayer):
+                    layers.append(self.dr_layers[lname])
+            elif isinstance(obj, bpy.types.Collection):
+                if obj == bpy.context.scene.collection:
+                    layers.append(self.dr_layers[lname])
+                    continue
+                layercol = vlayer.layer_collection.children[obj.name]
+                if not (obj.hide_viewport or 
+                        layercol.hide_viewport or layercol.exclude):
+                    layers.append(self.dr_layers[lname])
+        if not layers:
+            layers.append(0)        
+        self.dr_string += f"\n\t\tNode {{ {' '.join(map(str, layers))} }}"
+        self.dr_string += f" // {obj.name}"
 
 
     def entname(self, ent):
@@ -673,6 +714,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             vert.co = self.gridsnap(vert.co * self.option_scale)
 
         if geo_type == 'Brush':
+            self.objlayer(orig_obj)
             hull = bmesh.ops.convex_hull(bm, input=bm.verts,
                                         use_existing_faces=True)
             geom_hull = hull['geom'] + hull['geom_holes']
@@ -713,6 +755,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(template[0])
                 fw(self.brushplane(face))
                 fw(self.texdata(face, bm, obj) + flags) # write original face
+                self.objlayer(orig_obj)
 
                 if geo_type in ('Faces', 'Blob'):
                     new = bmesh.ops.poke(bm, faces=[face],
@@ -755,6 +798,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
 
     def process_patch(self, obj, spline, fw):
+        self.objlayer(obj)
         mat = None
         if obj.material_slots:
             mat = obj.material_slots[spline.material_index].material
@@ -794,6 +838,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
 
 
     def process_light(self, obj, fw):
+        self.objlayer(obj)
         intensity = obj.data.energy
         origin = obj.matrix_world.to_translation() * self.option_scale
         fw('{\n"classname" "light"\n')
@@ -853,10 +898,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(f'"classname" "{self.spot_class}"\n')
                 fw(f'"origin" "{self.printvec(spot_org)}"\n')
                 fw(f'"targetname" "{self.spot_name}{spot_num}"\n')
+                self.objlayer(obj)
         fw('}\n')
 
 
     def process_empty(self, obj, fw):
+        self.objlayer(obj)
         name = obj.name.rstrip('0123456789')
         name = name[:-1] if name[-1] in ('.',' ') else obj.name
         fw('{\n"classname" "' + name + '"\n')
@@ -894,6 +941,24 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         fw('{\n"classname" "worldspawn"\n')
         if self.option_uv == 'Valve':
             fw('"mapversion" "220"\n')
+
+        if self.option_drlayers:
+            self.dr_layers = {'Default': 0}
+            self.dr_string = 'DarkRadiant Map Information File Version 2\n{'\
+                '\n\tMapProperties\n\t{'\
+                '\n\t\tKeyValue { "EditTimeInSeconds" "0" }'\
+                '\n\t\tKeyValue { "LastCameraAngle" "0 0 0" }'\
+                '\n\t\tKeyValue { "LastCameraPosition" "0 0 0" }\n\t}'\
+                '\n\tMapEditTimings\n\t{\n\t\tTotalSecondsEdited { 0 }\n\t}'\
+                '\n\tLayers\n\t{\n\t\tLayer 0 { Default }'
+            for vlayer in bpy.context.scene.view_layers:
+                lname = self.layername(vlayer.name)
+                if (lname != 'Default') and (lname not in self.dr_layers):
+                    idx = len(self.dr_layers)
+                    self.dr_string += f"\n\t\tLayer {idx} {{ {lname} }}"
+                    self.dr_layers[lname] = idx
+            self.dr_string += '\n\t}\n\tNodeToLayerMapping\n\t{'\
+                            '\n\t\tNode { 0 } // entity (world)'
 
         # sort objects
         if self.option_sel:
@@ -948,10 +1013,12 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                     bmodel_face_objs.append(obj)
             if bmodel_brush_objs:
                 fw(self.entname(col))
+                self.objlayer(col)
                 for obj in bmodel_brush_objs:
                     self.process_mesh(obj, fw, template)
             for obj in bmodel_face_objs:
                 fw(self.entname(obj))
+                self.objlayer(obj)
                 self.process_mesh(obj, fw, template)
         fw('}\n')
         for obj in light_objs:
@@ -985,6 +1052,13 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             else:
                 self.report({'ERROR'},"GTK export is currently Windows-only")
                 bpy.context.window_manager.clipboard = scene_str
+
+        if self.option_drlayers:
+            self.dr_string += '\n\t}\n\tSelectionSets\n\t{\n\t}'\
+                            '\n\tSelectionGroups\n\t{\n\t}'\
+                            '\n\tSelectionGroupNodeMapping\n\t{\n\t}\n}\n'
+            with open(self.filepath[:-3]+'darkradiant', 'w') as file:
+                file.write(self.dr_string)
 
         timer = time.time() - timer
         self.report({'INFO'},f"Finished exporting map, took {timer:g} sec")
