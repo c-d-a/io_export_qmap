@@ -18,8 +18,8 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2023, 1, 15),
-    "blender": (3, 4, 1),
+    "version": (2023, 11, 14),
+    "blender": (4, 0, 0),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
     "category": "Import-Export",
@@ -392,14 +392,24 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             return "\n"
         elif self.option_flags == 'Q2':
             col = obj.users_collection[0]
-            if len(obj.face_maps) > 0:
+            if bpy.app.version < (4,0,0) and len(obj.face_maps) > 0:
                 obj.face_maps.new() # faces w/o face maps have index -1 (?)
                 fm_layer = mesh.faces.layers.face_map.verify()
                 fm_name = obj.face_maps[face[fm_layer]].name
                 obj.face_maps.remove(obj.face_maps[-1])
             else:
                 fm_name = ''
-            names = obj.name + col.name + fm_name
+            # Blender 4.0.0 does not provide python access to bool attributes
+            # so iterate over floats/strings/etc and treat non-zero as true
+            f_attr_names = []
+            for f_attrs_of_type in [getattr(mesh.faces.layers, dtype)
+                                    for dtype in dir(mesh.faces.layers)
+                                        if not dtype.startswith('__')]:
+                for f_attr_name in f_attrs_of_type.keys():
+                    if face[f_attrs_of_type.get(f_attr_name)]:
+                        f_attr_names.append(f_attr_name)
+
+            names = obj.name + col.name + fm_name + ''.join(f_attr_names)
             if 'detail' in names.lower():
                 return f" {1<<27} 0 0\n"
             else:

@@ -2,7 +2,7 @@
 
 This addon allows exporting Blender scenes to idTech .map file format.
 
-Supported Blender versions: 2.83 - 3.4+  
+Supported Blender versions: 2.83 - 4.0+  
 Supported game formats: Quake, Half-Life, Quake 2, Quake 3, Doom 3, Quake 4  
 Other Quake-derived games (Jedi Academy, Call of Duty, etc) are untested, but hopefully also compatible.
 
@@ -21,7 +21,6 @@ The addon preferences allow you to change the default settings used in the expor
 ## Mesh Options
 The map format requires each brush to be convex.  
 There are many ways to represent a mesh with brushes, each with their pros and cons.  
-(if you can't see the animation below, [open](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif) it in another tab or try a different web browser)  
 ![mesh](https://user-images.githubusercontent.com/55441216/187100469-4b5e427d-c0ab-420b-aa68-8abb5e55ddb0.gif)
 
 For complex scenes, you can override mesh export mode on a per-object basis:  
@@ -46,7 +45,7 @@ Since the .map format doesn't store individual vertices, it doesn't store indivi
 
 ### Flags
 Quake 2 introduced flags for defining various special properties (lights, etc). The flags carried over to Quake 3, still remained in vestigial form in Doom 3, and were removed in the Quake 4 format.  
-The exporter currently only supports the Detail flag. For any face belonging to an object, a collection, or a face map with "detail" anywhere in their name, the exported surface will get its Detail flag set.
+The exporter currently only supports the Detail flag. For any face belonging to an object, a collection, or assigned a non-zero attribute with "detail" anywhere in their name, the exported surface will get its Detail flag set.
 
 ### Clipboard
 For convenience, the exporter can put the map data into the system clipboard, instead of writing it to a .map file. In this case, the filename in the export dialogue is ignored, and the data is ready to be pasted directly into an open map in your editor of choice. Some functionality may depend on the editor automatically re-assigning the entity names and targets.
