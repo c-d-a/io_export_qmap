@@ -18,8 +18,8 @@
 bl_info = {
     "name": "Export Quake Map (.map)",
     "author": "chedap",
-    "version": (2023, 11, 14),
-    "blender": (4, 0, 0),
+    "version": (2024, 1, 22),
+    "blender": (4, 0, 2),
     "location": "File > Import-Export",
     "description": "Export scene to idTech map format",
     "category": "Import-Export",
@@ -72,10 +72,11 @@ ptxt = {
                 "\nUseful when you want to save on collision planes"),
             ('Blob',"Blob","Export faces as pyramids with a common apex"\
                 "\n\nPuts the shared apex at object's origin point"\
-                "\nUseful when you want a solid sealed convex-ish asteroid"),
+                "\nUseful when you want a solid sealed convex-ish boulder"),
             ('Miter',"Shell","Export faces as a solidified shell"\
                 "\n\nExtrudes along vert normals, with miter joints inbetween"\
-                "\nUnreliable, as the resulting joints may be non-planar") )},
+                "\nUnreliable, as the resulting joints may be non-planar"),
+            ('Patches',"Patches","Export each face as a flat patch (fast)") )},
     'nurbs': {"name":"Nurbs", "def":'Mesh',
         "items":(
             ('None', "Ignore", "Ignore NURBS surfaces"),
@@ -682,7 +683,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         for vert in bm.verts:
             vert.co = self.gridsnap(vert.co * self.option_scale)
 
-        if geo_type == 'Brush':
+        if geo_type == 'Brush': # export entire mesh as a single brush
             hull = bmesh.ops.convex_hull(bm, input=bm.verts,
                                         use_existing_faces=True)
             geom_hull = hull['geom'] + hull['geom_holes']
@@ -700,7 +701,32 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
                 fw(self.texdata(face, bm, obj) + flags)
             fw(template[1])
 
-        else: # export individual faces
+        elif geo_type == 'Patches': # export each face as a flat patch
+            ngons = [face for face in bm.faces if len(face.loops) > 4]
+            bmesh.ops.triangulate(bm, faces=ngons)
+            uv_layer = bm.loops.layers.uv.active
+            if uv_layer is None:
+                uv_layer = bm.loops.layers.uv.new("dummy")
+            for face in bm.faces:
+                mat = None
+                if obj.material_slots:
+                    mat = obj.material_slots[face.material_index].material
+                if mat:
+                    matname = mat.name.replace(" ","_")
+                else:
+                    matname = self.option_skip
+                if self.option_brush == 'Doom3':
+                    matname = f'"{matname}"'
+                fw(f"{{\npatchDef2\n{{\n{matname}\n( 3 3 0 0 0 )\n(\n")
+                pts = []
+                for loop in face.loops:
+                    pts.append(f"{self.printvec(loop.vert.co)} "\
+                        f"{self.printvec(loop[uv_layer].uv * Vector((1,-1)))}")
+                fw(f"( ( {pts[1]} ) ( {pts[1]} ) ( {pts[0]} ) )\n" * 2)
+                fw(f"( ( {pts[2]} ) ( {pts[2]} ) ( {pts[len(pts)-1]} ) )\n")
+                fw(")\n}\n}\n")
+
+        else: # export each face as a brush
             bmesh.ops.connect_verts_concave(bm, faces=bm.faces) # concave poly
             if self.option_tj:
                 tjfaces = []
@@ -764,7 +790,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
         orig_obj.data.materials.pop() # remove the empty slot
 
 
-    def process_patch(self, obj, spline, fw):
+    def process_nurbs(self, obj, spline, fw):
         mat = None
         if obj.material_slots:
             mat = obj.material_slots[spline.material_index].material
@@ -944,7 +970,7 @@ class ExportQuakeMap(bpy.types.Operator, ExportHelper):
             self.process_mesh(obj, fw, template)
         for obj in patch_objs:
             for spline in obj.data.splines:
-                self.process_patch(obj, spline, fw)
+                self.process_nurbs(obj, spline, fw)
         collections = [bpy.context.scene.collection] + bpy.data.collections[:]
         for col in collections:
             bmodel_brush_objs, bmodel_face_objs = [],[]
